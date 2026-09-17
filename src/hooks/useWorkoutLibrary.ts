@@ -76,7 +76,6 @@ export function useWorkoutLibrary(settings: AppSettings) {
 
       if (existing.length === 0) {
         const created = createWorkout({
-          name: 'Sweet spot builder',
           ftp: settings.ftp,
           powerUnit: settings.powerUnit,
         })

@@ -49,7 +49,9 @@ export function WorkoutChart({
 
         <div className="chart-plot">
           {workout.blocks.length === 0 ? (
-            <div className="chart-empty">Drag a block here to start the ride</div>
+            <div className="chart-empty">
+              Your profile will appear here after you generate or add blocks.
+            </div>
           ) : (
             <div className="chart-stage">
               <div className="chart-grid" aria-hidden>

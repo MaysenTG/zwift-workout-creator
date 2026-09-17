@@ -231,6 +231,48 @@ function App() {
     )
   }
 
+  const isBlankWorkout = workout.blocks.length === 0
+
+  const aiPanel = (
+    <AiWorkoutPanel
+      workout={workout}
+      onLoadingChange={setAiGenerating}
+      onApply={({ name, description, blocks }) => {
+        updateWorkout((current) => ({
+          ...current,
+          name,
+          description,
+          blocks,
+        }))
+        setBlockRevealEpoch((n) => n + 1)
+        setSelectedId(blocks[0]?.id ?? null)
+      }}
+    />
+  )
+
+  const palette = (
+    <Palette
+      onAdd={(type) => {
+        if (skipPaletteClickRef.current) {
+          skipPaletteClickRef.current = false
+          return
+        }
+        const next = createBlock(type)
+        setBlocks([...workout.blocks, next], next.id)
+      }}
+    />
+  )
+
+  const chart = (
+    <WorkoutChart
+      workout={chartWorkout}
+      selectedId={selectedId}
+      onSelect={setSelectedId}
+      isGenerating={aiGenerating}
+      revealEpoch={blockRevealEpoch}
+    />
+  )
+
   return (
     <DndContext
       sensors={sensors}
@@ -255,7 +297,7 @@ function App() {
           }}
         />
 
-        <div className="main">
+        <div className={`main ${isBlankWorkout ? 'main-blank' : ''}`}>
           <TopBar
             workout={workout}
             globalFtp={settings.ftp}
@@ -266,45 +308,28 @@ function App() {
             onApplyGlobalFtp={library.applyFtpToCurrent}
             onImport={(imported) => void library.importWorkout(imported)}
           />
-          <Palette
-            onAdd={(type) => {
-              if (skipPaletteClickRef.current) {
-                skipPaletteClickRef.current = false
-                return
-              }
-              const next = createBlock(type)
-              setBlocks([...workout.blocks, next], next.id)
-            }}
-          />
-          <AiWorkoutPanel
-            workout={workout}
-            onLoadingChange={setAiGenerating}
-            onApply={({ name, description, blocks }) => {
-              updateWorkout((current) => ({
-                ...current,
-                name,
-                description,
-                blocks,
-              }))
-              setBlockRevealEpoch((n) => n + 1)
-              setSelectedId(blocks[0]?.id ?? null)
-            }}
-          />
-          <WorkoutChart
-            workout={chartWorkout}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            isGenerating={aiGenerating}
-            revealEpoch={blockRevealEpoch}
-          />
-          <ul className="zone-legend">
-            {POWER_ZONES.map((zone) => (
-              <li key={zone.id}>
-                <i style={{ background: zone.color }} />
-                {zone.short}
-              </li>
-            ))}
-          </ul>
+          {isBlankWorkout ? (
+            <>
+              {aiPanel}
+              <p className="blank-or-divider">Or add blocks manually</p>
+              <div className="blank-manual">{palette}</div>
+              <div className="blank-chart">{chart}</div>
+            </>
+          ) : (
+            <>
+              {palette}
+              {aiPanel}
+              {chart}
+              <ul className="zone-legend">
+                {POWER_ZONES.map((zone) => (
+                  <li key={zone.id}>
+                    <i style={{ background: zone.color }} />
+                    {zone.short}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
 
         <Inspector

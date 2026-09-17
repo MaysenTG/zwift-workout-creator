@@ -26,24 +26,6 @@ export function createBlock(type: BlockType): WorkoutBlock {
   }
 }
 
-export function starterBlocks(): WorkoutBlock[] {
-  return [
-    createBlock('warmup'),
-    { id: uid(), type: 'steady', durationSec: 180, powerPct: 65 },
-    {
-      id: uid(),
-      type: 'intervals',
-      repeat: 4,
-      onDurationSec: 180,
-      offDurationSec: 120,
-      onPct: 108,
-      offPct: 50,
-    },
-    { id: uid(), type: 'steady', durationSec: 180, powerPct: 55 },
-    createBlock('cooldown'),
-  ]
-}
-
 export function createWorkout(partial?: Partial<Workout>): Workout {
   const now = Date.now()
   return {
@@ -53,7 +35,7 @@ export function createWorkout(partial?: Partial<Workout>): Workout {
     description: '',
     ftp: 200,
     powerUnit: 'percent',
-    blocks: starterBlocks(),
+    blocks: [],
     createdAt: now,
     updatedAt: now,
     ...partial,

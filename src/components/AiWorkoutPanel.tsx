@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { generateWorkoutFromPrompt } from '../lib/api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { generateWorkoutFromPrompt, getGenerateWorkoutErrorInfo } from '../lib/api'
 import { blocksFromAiPayload, workoutToAiContext } from '../lib/aiBlocks'
 import { summarizeAiWorkoutChange } from '../lib/workoutDiff'
 import type { Workout, WorkoutBlock } from '../types'
@@ -19,26 +19,37 @@ interface Props {
 }
 
 export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
+  const promptRef = useRef<HTMLTextAreaElement>(null)
   const [open, setOpen] = useState(true)
   const [prompt, setPrompt] = useState('')
   const [loading, setLoading] = useState(false)
   const [stepIndex, setStepIndex] = useState(0)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ title: string; message: string; hint?: string } | null>(
+    null,
+  )
   const [changeSummary, setChangeSummary] = useState<string[] | null>(null)
 
   const hasBlocks = workout.blocks.length > 0
+  const prominent = !hasBlocks
 
   const placeholder = useMemo(
     () =>
       hasBlocks
         ? 'e.g. Make the intervals 10 seconds longer and add 5 min cooldown'
-        : 'e.g. 45 minute sweet spot ride with 3×8 min at 92% and easy spin between',
+        : 'e.g. 45 minute sweet spot ride with 3×8 min at 92% FTP and easy spin between',
     [hasBlocks],
   )
 
   useEffect(() => {
     onLoadingChange(loading)
   }, [loading, onLoadingChange])
+
+  useEffect(() => {
+    if (prominent) {
+      setOpen(true)
+      promptRef.current?.focus()
+    }
+  }, [prominent, workout.id])
 
   useEffect(() => {
     if (!loading) {
@@ -80,35 +91,48 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
       setChangeSummary(summarizeAiWorkoutChange(before, after))
       onApply(after)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Generation failed.')
+      setError(getGenerateWorkoutErrorInfo(err))
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <section className={`ai-panel ${open ? 'is-open' : ''} ${loading ? 'is-loading' : ''}`}>
-      <button
-        type="button"
-        className="ai-panel-toggle"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <span className="ai-panel-title">Natural language</span>
-        <span className="ai-panel-chevron" aria-hidden />
-      </button>
+    <section
+      className={`ai-panel ${open ? 'is-open' : ''} ${loading ? 'is-loading' : ''} ${prominent ? 'ai-panel-prominent' : ''}`}
+    >
+      {prominent ? (
+        <header className="ai-hero-head">
+          <h2>Describe your workout</h2>
+          <p>
+            Start in plain English—warmup, intervals, cooldown—and we&apos;ll build the Zwift
+            profile. You can drag blocks and tweak watts after.
+          </p>
+        </header>
+      ) : (
+        <button
+          type="button"
+          className="ai-panel-toggle"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          <span className="ai-panel-title">Natural language</span>
+          <span className="ai-panel-chevron" aria-hidden />
+        </button>
+      )}
 
       {open ? (
         <div className="ai-panel-body">
-          <p className="ai-panel-lead">
-            {hasBlocks
-              ? 'Describe changes and the AI will rework this profile. You can still drag blocks after.'
-              : 'Describe a ride and the AI will build the profile from scratch.'}
-          </p>
+          {!prominent ? (
+            <p className="ai-panel-lead">
+              Describe changes and the AI will rework this profile. You can still drag blocks after.
+            </p>
+          ) : null}
 
           <textarea
+            ref={promptRef}
             className="ai-prompt"
-            rows={3}
+            rows={prominent ? 5 : 3}
             value={prompt}
             disabled={loading}
             placeholder={placeholder}
@@ -129,7 +153,7 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
               disabled={loading || !prompt.trim()}
               onClick={() => void submit()}
             >
-              {loading ? 'Generating…' : 'Generate'}
+              {loading ? 'Generating…' : prominent ? 'Generate workout' : 'Generate'}
             </button>
           </div>
 
@@ -144,7 +168,14 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
             </div>
           ) : null}
 
-          {error ? <p className="ai-error">{error}</p> : null}
+          {error ? (
+            <div className="ai-error-panel" role="alert">
+              <strong>{error.title}</strong>
+              <p>{error.message}</p>
+              {error.hint ? <p className="ai-error-hint">{error.hint}</p> : null}
+            </div>
+          ) : null}
+
           {changeSummary ? (
             <div className="ai-change-summary" role="status">
               <strong>What changed</strong>

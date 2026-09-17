@@ -101,7 +101,11 @@ export function Inspector({
           onRemove={() => onRemove(selected.id)}
         />
       ) : (
-        <p className="inspector-empty">Select a block on the profile to edit power and time.</p>
+        <p className="inspector-empty">
+          {workout.blocks.length === 0
+            ? 'Use natural language above or drag blocks onto the profile.'
+            : 'Select a block on the profile to edit power and time.'}
+        </p>
       )}
     </aside>
   )
