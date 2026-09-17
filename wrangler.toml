@@ -1,0 +1,4 @@
+# Cloudflare Pages (static app). Deploy with: npx wrangler pages deploy dist
+name = "zwo-builder"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-01-01"

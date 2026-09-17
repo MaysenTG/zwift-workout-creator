@@ -1,0 +1,9 @@
+name = "zwo-builder-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[observability]
+enabled = true
+
+[dev]
+port = 8787
