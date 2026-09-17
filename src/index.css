@@ -1002,11 +1002,32 @@ code {
   color: var(--accent);
 }
 
-.ai-success {
-  margin: 0;
+.ai-change-summary {
+  padding: 10px 12px;
+  background: var(--ok-bg);
+  border: 1px solid #b8d4be;
   font-size: 12px;
-  color: #2d6a3e;
+  line-height: 1.45;
   animation: ai-success-in 0.35s ease;
+}
+
+.ai-change-summary strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #2d6a3e;
+}
+
+.ai-change-summary ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--ink);
+}
+
+.ai-change-summary li + li {
+  margin-top: 4px;
 }
 
 @keyframes ai-success-in {

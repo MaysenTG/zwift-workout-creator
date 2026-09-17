@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { generateWorkoutFromPrompt } from '../lib/api'
 import { blocksFromAiPayload, workoutToAiContext } from '../lib/aiBlocks'
+import { summarizeAiWorkoutChange } from '../lib/workoutDiff'
 import type { Workout, WorkoutBlock } from '../types'
 
 const LOADING_STEPS = [
@@ -23,7 +24,7 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
   const [loading, setLoading] = useState(false)
   const [stepIndex, setStepIndex] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [changeSummary, setChangeSummary] = useState<string[] | null>(null)
 
   const hasBlocks = workout.blocks.length > 0
 
@@ -55,8 +56,14 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
     if (!text || loading) return
 
     setError(null)
-    setSuccess(false)
+    setChangeSummary(null)
     setLoading(true)
+
+    const before = {
+      name: workout.name,
+      description: workout.description,
+      blocks: structuredClone(workout.blocks),
+    }
 
     try {
       const result = await generateWorkoutFromPrompt(
@@ -64,13 +71,14 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
         workout.ftp,
         hasBlocks ? workoutToAiContext(workout) : undefined,
       )
-      onApply({
+      const blocks = blocksFromAiPayload(result.blocks)
+      const after = {
         name: result.name,
         description: result.description,
-        blocks: blocksFromAiPayload(result.blocks),
-      })
-      setSuccess(true)
-      window.setTimeout(() => setSuccess(false), 3200)
+        blocks,
+      }
+      setChangeSummary(summarizeAiWorkoutChange(before, after))
+      onApply(after)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Generation failed.')
     } finally {
@@ -137,10 +145,15 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
           ) : null}
 
           {error ? <p className="ai-error">{error}</p> : null}
-          {success ? (
-            <p className="ai-success" role="status">
-              Workout updated—check the profile below.
-            </p>
+          {changeSummary ? (
+            <div className="ai-change-summary" role="status">
+              <strong>What changed</strong>
+              <ul>
+                {changeSummary.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </div>
       ) : null}
