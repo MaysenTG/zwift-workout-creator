@@ -62,12 +62,36 @@ Never put `OPENAI_API_KEY` in `VITE_*` variables — those are embedded in the c
    | `CLOUDFLARE_ACCOUNT_ID` | Account ID |
    | `VITE_API_BASE` | Worker URL (no trailing slash) |
 
-6. Push to `main` or `master` to run **Deploy to Cloudflare**, or connect the repo in **Workers & Pages → Create → Connect to Git** with:
+6. Push to `main` or `master` to run **Deploy to Cloudflare** (deploys both worker and Pages).
 
-   - Build command: `npm run build`
-   - Build output: `dist`
-   - Root directory: `/`
-   - Build environment variable: `VITE_API_BASE` = your worker URL
+### Cloudflare dashboard: Pages (frontend) via Git
+
+Use a **Pages** project for the React app only. The API is a **separate Worker** (step 4 above or a second Git-connected Worker project).
+
+| Setting | Value |
+|---------|--------|
+| Framework preset | None |
+| Root directory | `/` (repo root) |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| **Deploy command** | **Leave empty** (default). Pages publishes `dist` automatically. |
+| Environment variables (Build) | `VITE_API_BASE` = `https://zwo-builder-api.<you>.workers.dev` (no trailing slash) |
+
+**Do not** set the deploy command to `npx wrangler deploy`. That command is for the **Worker** in `worker/`, not for Pages. The root `wrangler.toml` only declares `pages_build_output_dir`; it has no `main` script, so `wrangler deploy` fails with “Missing entry-point”.
+
+If your UI forces a deploy command, use GitHub Actions instead (`.github/workflows/deploy-cloudflare.yml`), which runs `wrangler deploy` in `worker/` and `wrangler pages deploy dist` separately.
+
+### Cloudflare dashboard: Worker (API) via Git (optional)
+
+Second project, type **Worker** (not Pages):
+
+| Setting | Value |
+|---------|--------|
+| Root directory | `/` |
+| Build command | `npm ci` (installs Wrangler at repo root) |
+| Deploy command | `npx wrangler deploy --config worker/wrangler.toml` |
+
+Set secrets on that worker in the dashboard or with `wrangler secret put` (`OPENAI_API_KEY`, `ALLOWED_ORIGINS`).
 
 ### Architecture
 
