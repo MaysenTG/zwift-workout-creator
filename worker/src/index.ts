@@ -38,7 +38,8 @@ const WORKOUT_JSON_SCHEMA = {
       },
       ftp: {
         type: 'number',
-        description: 'Optional workout FTP in watts; omit unless changing FTP',
+        description:
+          'Workout FTP in watts (50–600). Use the rider FTP from the prompt unless the user asks to change it.',
       },
       blocks: {
         type: 'array',
@@ -98,7 +99,7 @@ const WORKOUT_JSON_SCHEMA = {
         },
       },
     },
-    required: ['name', 'description', 'blocks'],
+    required: ['name', 'description', 'ftp', 'blocks'],
     additionalProperties: false,
   },
 } as const
@@ -170,8 +171,8 @@ async function handleGenerate(
       description: generated.description || '',
       blocks,
     }
-    const ftpOut = validateFtpOptional(generated.ftp)
-    if (ftpOut !== undefined) response.ftp = ftpOut
+    const ftpOut = validateFtpOptional(generated.ftp) ?? body.ftp
+    if (ftpOut !== body.ftp) response.ftp = ftpOut
 
     return json(response, 200, cors)
   } catch (err) {
@@ -203,9 +204,9 @@ Block schema (durations in seconds; power fields are % FTP, not watts):
 - freeride: { "type": "freeride", "durationSec" }
 
 Always set a clear workout name and a short description (goal, key efforts, total time feel).
-Output one JSON object with these exact top-level keys (not nested under "workout"): "name", "description", "blocks", and optional "ftp".
-Example shape: { "name": "Sweet Spot 60", "description": "3×8 min at 92% with easy spin recoveries.", "blocks": [ ... ] }
-Include "ftp" (watts, 50–600) only when the user asks to change workout FTP or you recommend a specific FTP for the plan.
+Output one JSON object with these exact top-level keys (not nested under "workout"): "name", "description", "ftp", "blocks".
+Example shape: { "name": "Sweet Spot 60", "description": "3×8 min at 92% with easy spin recoveries.", "ftp": 250, "blocks": [ ... ] }
+Always set "ftp" to the rider FTP from the user message unless they explicitly ask for a different workout FTP.
 When editing, return the full updated profile (all blocks plus name and description), not a partial patch.`
 
   const userContent = current
@@ -296,6 +297,9 @@ function assertWorkoutJsonShape(raw: unknown): void {
   }
   if (typeof obj.description !== 'string') {
     throw new Error('OpenAI JSON missing string field "description".')
+  }
+  if (typeof obj.ftp !== 'number' || !Number.isFinite(obj.ftp)) {
+    throw new Error('OpenAI JSON missing numeric field "ftp".')
   }
   if (!Array.isArray(obj.blocks)) {
     throw new Error('OpenAI JSON missing array field "blocks".')
