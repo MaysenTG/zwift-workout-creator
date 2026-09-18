@@ -8,6 +8,14 @@ import {
   setAllWorkoutsFtp,
 } from '../lib/db'
 import { createWorkout } from '../lib/workout'
+import {
+  bumpWorkoutInOrder,
+  initialOrderFromSummaries,
+  orderSummaries,
+  readWorkoutOrder,
+  removeWorkoutFromOrder,
+  writeWorkoutOrder,
+} from '../lib/workoutOrder'
 import type { AppSettings } from '../lib/settings'
 
 const LAST_ID_KEY = 'wattline:last-workout-id'
@@ -34,7 +42,12 @@ export function useWorkoutLibrary(settings: AppSettings) {
   const lastMetaAtRef = useRef(0)
 
   const refresh = useCallback(async () => {
-    setSummaries(await listWorkouts())
+    const fetched = await listWorkouts()
+    setSummaries((prev) => {
+      const order =
+        prev.length > 0 ? prev.map((s) => s.id) : readWorkoutOrder()
+      return orderSummaries(fetched, order)
+    })
   }, [])
 
   const syncHistoryFlags = useCallback(() => {
@@ -81,6 +94,7 @@ export function useWorkoutLibrary(settings: AppSettings) {
         })
         await saveWorkout(created)
         localStorage.setItem(LAST_ID_KEY, created.id)
+        writeWorkoutOrder([created.id])
         if (!cancelled) {
           setWorkout(created)
           setSummaries(await listWorkouts())
@@ -89,10 +103,18 @@ export function useWorkoutLibrary(settings: AppSettings) {
         return
       }
 
+      let order = readWorkoutOrder()
+      if (order.length === 0) {
+        order = initialOrderFromSummaries(existing)
+        writeWorkoutOrder(order)
+      }
+
       const lastId = localStorage.getItem(LAST_ID_KEY)
-      const selected = (lastId && (await getWorkout(lastId))) || (await getWorkout(existing[0].id))
+      const selected =
+        (lastId && (await getWorkout(lastId))) ||
+        (await getWorkout(orderSummaries(existing, order)[0]?.id ?? existing[0].id))
       if (cancelled) return
-      setSummaries(existing)
+      setSummaries(orderSummaries(existing, order))
       if (selected) {
         setWorkout(selected)
         localStorage.setItem(LAST_ID_KEY, selected.id)
@@ -122,6 +144,8 @@ export function useWorkoutLibrary(settings: AppSettings) {
       resetHistory()
       setWorkout(next)
       localStorage.setItem(LAST_ID_KEY, next.id)
+      const order = bumpWorkoutInOrder(id)
+      setSummaries((prev) => orderSummaries(prev, order))
     }
   }, [resetHistory])
 
@@ -134,8 +158,10 @@ export function useWorkoutLibrary(settings: AppSettings) {
     resetHistory()
     setWorkout(created)
     localStorage.setItem(LAST_ID_KEY, created.id)
-    await refresh()
-  }, [refresh, resetHistory, settings.ftp, settings.powerUnit])
+    const order = bumpWorkoutInOrder(created.id)
+    const fetched = await listWorkouts()
+    setSummaries(orderSummaries(fetched, order))
+  }, [resetHistory, settings.ftp, settings.powerUnit])
 
   const importWorkout = useCallback(
     async (imported: Workout) => {
@@ -147,15 +173,18 @@ export function useWorkoutLibrary(settings: AppSettings) {
       resetHistory()
       setWorkout(withDefaults)
       localStorage.setItem(LAST_ID_KEY, withDefaults.id)
-      await refresh()
+      const order = bumpWorkoutInOrder(withDefaults.id)
+      const fetched = await listWorkouts()
+      setSummaries(orderSummaries(fetched, order))
     },
-    [refresh, resetHistory, settings.ftp],
+    [resetHistory, settings.ftp],
   )
 
   const removeWorkout = useCallback(
     async (id: string) => {
       await deleteWorkout(id)
-      const remaining = await listWorkouts()
+      const order = removeWorkoutFromOrder(id)
+      const remaining = orderSummaries(await listWorkouts(), order)
       setSummaries(remaining)
       if (workout?.id === id) {
         if (remaining[0]) {

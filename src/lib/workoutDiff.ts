@@ -2,7 +2,7 @@ import { formatClock, formatMinutes } from './time'
 import { BLOCK_LABELS, workoutDuration } from './workout'
 import type { BlockType, Workout, WorkoutBlock } from '../types'
 
-type WorkoutSnapshot = Pick<Workout, 'name' | 'description' | 'blocks'>
+type WorkoutSnapshot = Pick<Workout, 'name' | 'description' | 'ftp' | 'blocks'>
 
 export function summarizeAiWorkoutChange(before: WorkoutSnapshot, after: WorkoutSnapshot): string[] {
   const lines: string[] = []
@@ -15,7 +15,17 @@ export function summarizeAiWorkoutChange(before: WorkoutSnapshot, after: Workout
     if (after.name && after.name !== before.name) {
       lines.push(`Title set to “${after.name}”.`)
     }
+    if (after.description.trim() && after.description !== before.description) {
+      lines.push('Set workout description.')
+    }
+    if (before.ftp !== after.ftp) {
+      lines.push(`FTP set to ${after.ftp} W.`)
+    }
     return lines
+  }
+
+  if (before.ftp !== after.ftp) {
+    lines.push(`FTP ${before.ftp} W → ${after.ftp} W.`)
   }
 
   if (before.name !== after.name) {

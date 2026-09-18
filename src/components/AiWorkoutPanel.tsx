@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { generateWorkoutFromPrompt, getGenerateWorkoutErrorInfo } from '../lib/api'
-import { blocksFromAiPayload, workoutToAiContext } from '../lib/aiBlocks'
+import { blocksFromAiPayload, isFreshAiWorkout, workoutToAiContext } from '../lib/aiBlocks'
 import { summarizeAiWorkoutChange } from '../lib/workoutDiff'
 import type { Workout, WorkoutBlock } from '../types'
 
@@ -14,7 +14,12 @@ const LOADING_STEPS = [
 
 interface Props {
   workout: Workout
-  onApply: (patch: { name: string; description: string; blocks: WorkoutBlock[] }) => void
+  onApply: (patch: {
+    name: string
+    description: string
+    blocks: WorkoutBlock[]
+    ftp?: number
+  }) => void
   onLoadingChange: (loading: boolean) => void
 }
 
@@ -73,6 +78,7 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
     const before = {
       name: workout.name,
       description: workout.description,
+      ftp: workout.ftp,
       blocks: structuredClone(workout.blocks),
     }
 
@@ -80,16 +86,27 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
       const result = await generateWorkoutFromPrompt(
         text,
         workout.ftp,
-        hasBlocks ? workoutToAiContext(workout) : undefined,
+        isFreshAiWorkout(workout) ? undefined : workoutToAiContext(workout),
       )
       const blocks = blocksFromAiPayload(result.blocks)
+      const name =
+        result.name.trim() ||
+        (isFreshAiWorkout(workout) ? 'Generated ride' : before.name.trim() || 'Untitled ride')
+      const description =
+        result.description.trim() || (isFreshAiWorkout(workout) ? '' : before.description)
       const after = {
-        name: result.name,
-        description: result.description,
+        name,
+        description,
+        ftp: result.ftp ?? workout.ftp,
         blocks,
       }
       setChangeSummary(summarizeAiWorkoutChange(before, after))
-      onApply(after)
+      onApply({
+        name,
+        description,
+        blocks,
+        ...(result.ftp !== undefined ? { ftp: result.ftp } : {}),
+      })
     } catch (err) {
       setError(getGenerateWorkoutErrorInfo(err))
     } finally {

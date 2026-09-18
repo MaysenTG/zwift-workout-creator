@@ -31,15 +31,13 @@ function getDb() {
 export async function listWorkouts(): Promise<WorkoutSummary[]> {
   const db = await getDb()
   const all = await db.getAll(STORE)
-  return all
-    .map((workout) => ({
-      id: workout.id,
-      name: workout.name,
-      updatedAt: workout.updatedAt,
-      durationSec: workoutDuration(workout.blocks),
-      ftp: workout.ftp,
-    }))
-    .sort((a, b) => b.updatedAt - a.updatedAt)
+  return all.map((workout) => ({
+    id: workout.id,
+    name: workout.name,
+    updatedAt: workout.updatedAt,
+    durationSec: workoutDuration(workout.blocks),
+    ftp: workout.ftp,
+  }))
 }
 
 export async function getWorkout(id: string): Promise<Workout | undefined> {

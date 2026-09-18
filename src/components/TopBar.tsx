@@ -105,7 +105,7 @@ export function TopBar({
             {copied ? 'Copied' : 'Copy XML'}
           </button>
           <button type="button" className="primary" onClick={() => downloadZwo(workout)}>
-            Export .zwo
+            Export for Zwift
           </button>
         </div>
       </div>

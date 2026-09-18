@@ -1,3 +1,5 @@
+import { normalizeGenerateWorkoutResponse } from './normalizeAiWorkout'
+
 /** Worker URL in production (set at Pages build time). Empty in dev → Vite proxies `/api`. */
 export function apiUrl(path: string): string {
   const base = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
@@ -33,11 +35,13 @@ export type GenerateWorkoutResponse = {
   name: string
   description: string
   blocks: GeneratedBlockPayload[]
+  ftp?: number
 }
 
 export type AiWorkoutContext = {
   name: string
   description: string
+  ftp: number
   blocks: GeneratedBlockPayload[]
 }
 
@@ -116,7 +120,7 @@ export async function generateWorkoutFromPrompt(
   current?: AiWorkoutContext,
 ): Promise<GenerateWorkoutResponse> {
   const payload: { prompt: string; ftp: number; current?: AiWorkoutContext } = { prompt, ftp }
-  if (current?.blocks.length) {
+  if (current) {
     payload.current = current
   }
 
@@ -163,7 +167,9 @@ export async function generateWorkoutFromPrompt(
     throw errorFromResponse(res.status, data.error)
   }
 
-  if (!Array.isArray(data.blocks) || data.blocks.length === 0) {
+  const normalized = normalizeGenerateWorkoutResponse(data)
+
+  if (!Array.isArray(normalized.blocks) || normalized.blocks.length === 0) {
     throw new GenerateWorkoutError({
       title: 'Empty workout',
       message: 'The API returned no blocks.',
@@ -171,5 +177,5 @@ export async function generateWorkoutFromPrompt(
     })
   }
 
-  return data
+  return normalized
 }

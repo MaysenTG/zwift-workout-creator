@@ -1,6 +1,6 @@
-# ZWO Builder
+# Zwift Workout Builder
 
-Browser-based Zwift bike workout builder. Drag blocks onto a power profile, edit duration and power, save locally, and export a `.zwo` file Zwift can import.
+Browser-based Zwift bike workout builder. Drag blocks onto a power profile, edit duration and power, save locally, and export workouts Zwift can import.
 
 Hosting: **Cloudflare Pages** (React app) + **Cloudflare Worker** (OpenAI API proxy).
 
@@ -34,6 +34,23 @@ Check the API: [http://127.0.0.1:8787/health](http://127.0.0.1:8787/health)
 
 Never put `OPENAI_API_KEY` in `VITE_*` variables — those are embedded in the client bundle.
 
+### Tip jar & optional ads
+
+The sidebar **Buy me a coffee** link is configured in [`src/siteMeta.ts`](src/siteMeta.ts) (`SUPPORT_TIP_URL` / `SUPPORT_TIP_LABEL`).
+
+**Non-intrusive ads (optional):**
+
+Copy [`.env.example`](.env.example) to `.env.local` for local builds, or set the same `VITE_*` variables on **Cloudflare Pages → Settings → Environment variables** (Production) and rebuild.
+
+
+1. **[EthicalAds](https://www.ethicalads.io/)** — common on open-source / dev tools; one small unit in the sidebar. Apply for a publisher account, then set:
+   - `VITE_ADS=ethical`
+   - `VITE_ETHICAL_ADS_PUBLISHER=<your-id>`
+2. **Google AdSense** — add their script to `index.html` and a ad `<div>` in a component; requires site approval and a privacy/cookie notice. Heavier and more intrusive than EthicalAds.
+3. **No ad network** — tip jar only keeps the UI cleanest for a workout editor.
+
+Add ad vars to GitHub Actions **Build app** step env if you deploy via CI.
+
 ## Deploy to Cloudflare
 
 ### One-time setup
@@ -61,6 +78,7 @@ Never put `OPENAI_API_KEY` in `VITE_*` variables — those are embedded in the c
    | `CLOUDFLARE_API_TOKEN` | API token |
    | `CLOUDFLARE_ACCOUNT_ID` | Account ID |
    | `VITE_API_BASE` | Worker URL (no trailing slash) |
+   | `VITE_SITE_URL` | Public Pages URL or custom domain (no trailing slash; used for SEO canonical, sitemap, Open Graph) |
 
 6. Push to `main` or `master` to run **Deploy to Cloudflare** (deploys both worker and Pages).
 
@@ -75,7 +93,7 @@ Use a **Pages** project for the React app only. The API is a **separate Worker**
 | Build command | `npm run build` |
 | Build output directory | `dist` |
 | **Deploy command** | **Leave empty** (default). Pages publishes `dist` automatically. |
-| Environment variables (Build) | `VITE_API_BASE` = `https://zwo-builder-api.<you>.workers.dev` (no trailing slash) |
+| Environment variables (Build) | `VITE_API_BASE` = worker URL; `VITE_SITE_URL` = your Pages or custom domain (both without trailing slash) |
 
 **Do not** set the deploy command to `npx wrangler deploy`. That command is for the **Worker** in `worker/`, not for Pages. The root `wrangler.toml` only declares `pages_build_output_dir`; it has no `main` script, so `wrangler deploy` fails with “Missing entry-point”.
 

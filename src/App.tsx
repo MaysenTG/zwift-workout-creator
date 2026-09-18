@@ -17,6 +17,7 @@ import { Inspector } from './components/Inspector'
 import { AiWorkoutPanel } from './components/AiWorkoutPanel'
 import { Palette } from './components/Palette'
 import { SettingsPanel } from './components/SettingsPanel'
+import { SeoHead } from './components/SeoHead'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
 import { WorkoutChart } from './components/WorkoutChart'
@@ -237,12 +238,13 @@ function App() {
     <AiWorkoutPanel
       workout={workout}
       onLoadingChange={setAiGenerating}
-      onApply={({ name, description, blocks }) => {
+      onApply={({ name, description, blocks, ftp }) => {
         updateWorkout((current) => ({
           ...current,
           name,
           description,
           blocks,
+          ...(ftp !== undefined ? { ftp } : {}),
         }))
         setBlockRevealEpoch((n) => n + 1)
         setSelectedId(blocks[0]?.id ?? null)
@@ -282,6 +284,7 @@ function App() {
       onDragEnd={onDragEnd}
       onDragCancel={finishPaletteDrag}
     >
+      <SeoHead workoutName={workout.name} />
       <div className="app-shell">
         <Sidebar
           summaries={library.summaries}
@@ -297,7 +300,7 @@ function App() {
           }}
         />
 
-        <div className={`main ${isBlankWorkout ? 'main-blank' : ''}`}>
+        <main className={`main ${isBlankWorkout ? 'main-blank' : ''}`} id="main-content">
           <TopBar
             workout={workout}
             globalFtp={settings.ftp}
@@ -319,7 +322,7 @@ function App() {
             <>
               {palette}
               {aiPanel}
-              {chart}
+              <div className="main-chart">{chart}</div>
               <ul className="zone-legend">
                 {POWER_ZONES.map((zone) => (
                   <li key={zone.id}>
@@ -330,7 +333,7 @@ function App() {
               </ul>
             </>
           )}
-        </div>
+        </main>
 
         <Inspector
           workout={workout}

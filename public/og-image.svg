@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#faf8f4"/>
+  <rect x="0" y="520" width="1200" height="110" fill="#1c1b18"/>
+  <text x="80" y="200" fill="#1c1b18" font-family="system-ui,Segoe UI,sans-serif" font-size="64" font-weight="700">
+    Zwift Workout Builder
+  </text>
+  <text x="80" y="280" fill="#4a4843" font-family="system-ui,Segoe UI,sans-serif" font-size="36">
+    Custom bike workouts  edit, save, export for Zwift
+  </text>
+  <rect x="80" y="340" width="72" height="120" fill="#6b8f71" rx="4"/>
+  <rect x="168" y="300" width="72" height="160" fill="#c47a2c" rx="4"/>
+  <rect x="256" y="260" width="72" height="200" fill="#a63d32" rx="4"/>
+  <rect x="344" y="320" width="72" height="140" fill="#6b8f71" rx="4"/>
+  <rect x="432" y="380" width="72" height="80" fill="#5a7a9a" rx="4"/>
+  <line x1="80" y1="468" x2="504" y2="468" stroke="#1c1b18" stroke-width="3"/>
+</svg>

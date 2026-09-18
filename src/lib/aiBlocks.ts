@@ -9,13 +9,23 @@ export function blocksFromAiPayload(payload: GeneratedBlockPayload[]): WorkoutBl
 export function workoutToAiContext(workout: Workout): {
   name: string
   description: string
+  ftp: number
   blocks: GeneratedBlockPayload[]
 } {
   return {
     name: workout.name,
     description: workout.description,
+    ftp: workout.ftp,
     blocks: workout.blocks.map(stripBlockId),
   }
+}
+
+export function isFreshAiWorkout(workout: Workout): boolean {
+  return (
+    workout.blocks.length === 0 &&
+    (!workout.name.trim() || workout.name === 'Untitled ride') &&
+    !workout.description.trim()
+  )
 }
 
 function stripBlockId(block: WorkoutBlock): GeneratedBlockPayload {

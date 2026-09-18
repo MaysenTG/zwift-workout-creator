@@ -29,6 +29,10 @@ jobs:
           # Set repository secret VITE_API_BASE to your worker URL, e.g.
           # https://zwo-builder-api.<account>.workers.dev
           VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
+          VITE_SITE_URL: ${{ secrets.VITE_SITE_URL }}
+          # Optional: EthicalAds (see .env.example)
+          VITE_ADS: ${{ secrets.VITE_ADS }}
+          VITE_ETHICAL_ADS_PUBLISHER: ${{ secrets.VITE_ETHICAL_ADS_PUBLISHER }}
 
       - name: Deploy Worker API
         uses: cloudflare/wrangler-action@v3

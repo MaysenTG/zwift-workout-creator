@@ -1,5 +1,7 @@
 import { formatClock } from '../lib/time'
+import { SITE_NAME, SITE_TAGLINE } from '../lib/site'
 import type { WorkoutSummary } from '../types'
+import { SupportAside } from './SupportAside'
 
 interface Props {
   summaries: WorkoutSummary[]
@@ -21,10 +23,14 @@ export function Sidebar({
   onOpenSettings,
 }: Props) {
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" aria-label="Workout library">
       <header className="site-head">
-        <h1 className="site-title">ZWO Builder</h1>
-        <p className="site-tag">Custom Zwift bike workouts</p>
+        <p className="site-title">{SITE_NAME}</p>
+        <p className="site-tag">{SITE_TAGLINE}</p>
+        <p className="site-intro">
+          Build custom Zwift bike workouts in your browser—visual power editor, local library, AI
+          assist, and export for Zwift.
+        </p>
       </header>
 
       <div className="sidebar-actions">
@@ -68,6 +74,8 @@ export function Sidebar({
         Workouts are stored locally in this browser. They are not synced to other devices or
         accounts.
       </div>
+
+      <SupportAside />
     </aside>
   )
 }

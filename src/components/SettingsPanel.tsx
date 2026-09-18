@@ -49,7 +49,7 @@ export function SettingsPanel({
           />
         </label>
         <p className="modal-copy">
-          New workouts use this FTP. Power targets in a .zwo file are still stored as % of FTP, so
+          New workouts use this FTP. Exported Zwift workouts still store power as % of FTP, so
           changing FTP changes the watts you see here, not the exported percentages.
         </p>
 
