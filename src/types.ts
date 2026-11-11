@@ -64,6 +64,17 @@ export type WorkoutBlock =
   | IntervalsBlock
   | FreeRideBlock
 
+/** One natural-language AI request (and outcome) against a workout. */
+export interface WorkoutAiAuditEntry {
+  id: string
+  at: number
+  kind: 'create' | 'edit'
+  prompt: string
+  clarifications?: { question: string; answer: string }[]
+  /** Human-readable summary of what the model changed. */
+  changes: string[]
+}
+
 export interface Workout {
   id: string
   name: string
@@ -72,6 +83,8 @@ export interface Workout {
   ftp: number
   powerUnit: PowerUnit
   blocks: WorkoutBlock[]
+  /** Chronological log of AI prompts applied to this workout. */
+  aiHistory?: WorkoutAiAuditEntry[]
   createdAt: number
   updatedAt: number
 }

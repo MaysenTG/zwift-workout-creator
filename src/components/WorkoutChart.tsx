@@ -11,7 +11,7 @@ import type { Workout, WorkoutBlock } from '../types'
 interface Props {
   workout: Workout
   selectedId: string | null
-  onSelect: (id: string) => void
+  onSelect: (id: string | null) => void
   onChangeBlock?: (id: string, patch: Partial<WorkoutBlock>) => void
   durationSnapSec?: DurationSnapSec
   isGenerating?: boolean
@@ -42,7 +42,16 @@ export function WorkoutChart({
         </p>
       </div>
 
-      <div ref={setNodeRef} className={`chart ${isOver ? 'is-over' : ''}`}>
+      <div
+        ref={setNodeRef}
+        className={`chart ${isOver ? 'is-over' : ''}`}
+        onPointerDown={(event) => {
+          // Empty chart chrome (not a block) clears selection.
+          const target = event.target as Element | null
+          if (target?.closest('.chart-block')) return
+          if (selectedId) onSelect(null)
+        }}
+      >
         <div className="chart-axis" aria-hidden>
           {[100, 75, 50, 25].map((mark) => (
             <span
@@ -130,7 +139,7 @@ function ChartBlock({
   totalDuration: number
   ftp: number
   unit: Workout['powerUnit']
-  onSelect: (id: string) => void
+  onSelect: (id: string | null) => void
   onChangeBlock?: (id: string, patch: Partial<WorkoutBlock>) => void
   durationSnapSec: DurationSnapSec
   revealEpoch: number

@@ -77,8 +77,8 @@ export function Sidebar({
       </ul>
 
       <div className="local-notice" role="status">
-        Workouts are stored locally in this browser. They are not synced to other devices or
-        accounts.
+        Workouts sync to the cloud via this library link — no account. Open Preferences to copy or
+        restore your link.
       </div>
 
       <SupportAside />

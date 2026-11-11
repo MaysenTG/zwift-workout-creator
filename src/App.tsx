@@ -25,6 +25,7 @@ import { useMediaQuery } from './hooks/useMediaQuery'
 import { useSettings } from './hooks/useSettings'
 import { useWorkoutIntensity } from './hooks/useWorkoutIntensity'
 import { useWorkoutLibrary } from './hooks/useWorkoutLibrary'
+import { appendAiAuditEntry } from './lib/aiAudit'
 import { uid } from './lib/ids'
 import { BLOCK_LABELS, createBlock } from './lib/workout'
 import { POWER_ZONES } from './lib/zones'
@@ -76,13 +77,31 @@ function App() {
 
   useEffect(() => {
     if (!workout) return
+    // Only re-select when the current selection was deleted — allow intentional clear.
     if (selectedId && !workout.blocks.some((block) => block.id === selectedId)) {
       setSelectedId(workout.blocks[0]?.id ?? null)
     }
-    if (!selectedId && workout.blocks[0]) {
-      setSelectedId(workout.blocks[0].id)
-    }
   }, [workout, selectedId])
+
+  useEffect(() => {
+    if (!selectedId) return
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Element | null
+      if (!target) return
+      if (target.closest('.chart-block')) return
+      if (
+        target.closest('.inspector') ||
+        target.closest('.inspector-sheet') ||
+        target.closest('.inspector-fab')
+      ) {
+        return
+      }
+      setSelectedId(null)
+      if (sheetMode) setInspectorSheetOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [selectedId, sheetMode])
 
   useEffect(() => {
     if (!sheetMode) setInspectorSheetOpen(false)
@@ -137,9 +156,12 @@ function App() {
     if (nextSelected !== undefined) setSelectedId(nextSelected)
   }
 
-  function selectBlock(id: string) {
+  function selectBlock(id: string | null) {
     setSelectedId(id)
-    if (sheetMode) setInspectorSheetOpen(true)
+    if (sheetMode) {
+      if (id) setInspectorSheetOpen(true)
+      else setInspectorSheetOpen(false)
+    }
   }
 
   function removeBlock(id: string) {
@@ -266,13 +288,14 @@ function App() {
     <AiWorkoutPanel
       workout={workout}
       onLoadingChange={setAiGenerating}
-      onApply={({ name, description, blocks, ftp }) => {
+      onApply={({ name, description, blocks, ftp, aiAuditEntry }) => {
         updateWorkout((current) => ({
           ...current,
           name,
           description,
           blocks,
           ...(ftp !== undefined ? { ftp } : {}),
+          aiHistory: appendAiAuditEntry(current, aiAuditEntry),
         }))
         setBlockRevealEpoch((n) => n + 1)
         setSelectedId(blocks[0]?.id ?? null)

@@ -1788,6 +1788,135 @@ code {
   margin-top: 4px;
 }
 
+.ai-audit {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.ai-audit-toggle {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.ai-audit-toggle:hover {
+  color: var(--ink);
+}
+
+.ai-audit-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  vertical-align: middle;
+}
+
+.ai-audit-toggle .ai-panel-chevron.is-flipped {
+  transform: rotate(180deg);
+}
+
+.ai-audit-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.ai-audit-item {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ai-audit-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+
+.ai-audit-kind {
+  font-weight: 650;
+  color: var(--ink);
+  font-family: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ai-audit-prompt {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-audit-clarifications {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-audit-clarifications li {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.ai-audit-q {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ai-audit-a {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ai-audit-changes {
+  margin: 8px 0 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+.ai-audit-changes li + li {
+  margin-top: 3px;
+}
+
 @keyframes ai-success-in {
   from {
     opacity: 0;

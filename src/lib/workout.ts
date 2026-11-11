@@ -65,6 +65,7 @@ export function createWorkout(partial?: Partial<Workout>): Workout {
     ftp: 200,
     powerUnit: 'percent',
     blocks: [],
+    aiHistory: [],
     createdAt: now,
     updatedAt: now,
     ...partial,

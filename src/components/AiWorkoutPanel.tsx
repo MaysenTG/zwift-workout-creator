@@ -4,9 +4,10 @@ import {
   getGenerateWorkoutErrorInfo,
   type ClarifyingQuestion,
 } from '../lib/api'
+import { createAiAuditEntry, formatAuditTime } from '../lib/aiAudit'
 import { blocksFromAiPayload, isFreshAiWorkout, workoutToAiContext } from '../lib/aiBlocks'
 import { summarizeAiWorkoutChange } from '../lib/workoutDiff'
-import type { Workout, WorkoutBlock } from '../types'
+import type { Workout, WorkoutAiAuditEntry, WorkoutBlock } from '../types'
 
 const LOADING_STEPS = [
   'Reading your request…',
@@ -31,6 +32,7 @@ interface Props {
     description: string
     blocks: WorkoutBlock[]
     ftp?: number
+    aiAuditEntry: WorkoutAiAuditEntry
   }) => void
   onLoadingChange: (loading: boolean) => void
 }
@@ -69,9 +71,11 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
     questions: ClarifyingQuestion[]
   } | null>(null)
   const [clarifyingAnswers, setClarifyingAnswers] = useState<ClarifyingAnswer[]>([])
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const hasBlocks = workout.blocks.length > 0
   const prominent = !hasBlocks
+  const aiHistory = workout.aiHistory ?? []
   const clarificationsReady =
     Boolean(clarifying) &&
     clarifyingAnswers.length === (clarifying?.questions.length ?? 0) &&
@@ -96,6 +100,7 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
     setError(null)
     setClarifying(null)
     setClarifyingAnswers([])
+    setHistoryOpen(false)
   }, [workout.id])
 
   useEffect(() => {
@@ -182,7 +187,15 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
         ftp: result.ftp ?? workout.ftp,
         blocks,
       }
-      setChangeSummary(summarizeAiWorkoutChange(before, after))
+      const changes = summarizeAiWorkoutChange(before, after)
+      const promptForLog = (options?.originalPrompt || text).trim()
+      const aiAuditEntry = createAiAuditEntry({
+        kind: before.blocks.length === 0 ? 'create' : 'edit',
+        prompt: promptForLog,
+        clarifications: options?.clarifications,
+        changes,
+      })
+      setChangeSummary(changes)
       userToggledOpenRef.current = true
       setOpen(true)
       onApply({
@@ -190,6 +203,7 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
         description,
         blocks,
         ...(result.ftp !== undefined ? { ftp: result.ftp } : {}),
+        aiAuditEntry,
       })
     } catch (err) {
       setError(getGenerateWorkoutErrorInfo(err))
@@ -421,6 +435,60 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
                   <li key={line}>{line}</li>
                 ))}
               </ul>
+            </div>
+          ) : null}
+
+          {aiHistory.length > 0 ? (
+            <div className="ai-audit">
+              <button
+                type="button"
+                className="ai-audit-toggle"
+                aria-expanded={historyOpen}
+                onClick={() => setHistoryOpen((v) => !v)}
+              >
+                <span>
+                  Prompt history
+                  <span className="ai-audit-count">{aiHistory.length}</span>
+                </span>
+                <span
+                  className={`ai-panel-chevron${historyOpen ? ' is-flipped' : ''}`}
+                  aria-hidden
+                />
+              </button>
+              {historyOpen ? (
+                <ol className="ai-audit-list">
+                  {[...aiHistory].reverse().map((entry) => (
+                    <li key={entry.id} className="ai-audit-item">
+                      <div className="ai-audit-meta">
+                        <span className="ai-audit-kind">
+                          {entry.kind === 'create' ? 'Created' : 'Edited'}
+                        </span>
+                        <time dateTime={new Date(entry.at).toISOString()}>
+                          {formatAuditTime(entry.at)}
+                        </time>
+                      </div>
+                      <p className="ai-audit-prompt">{entry.prompt}</p>
+                      {entry.clarifications?.length ? (
+                        <ul className="ai-audit-clarifications">
+                          {entry.clarifications.map((c) => (
+                            <li key={`${entry.id}-${c.question}`}>
+                              <span className="ai-audit-q">{c.question}</span>
+                              <span className="ai-audit-a">{c.answer}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {entry.changes.length > 0 ? (
+                        <ul className="ai-audit-changes">
+                          {entry.changes.map((line) => (
+                            <li key={`${entry.id}-${line}`}>{line}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
             </div>
           ) : null}
         </div>
