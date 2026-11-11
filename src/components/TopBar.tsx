@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { downloadZwo, parseZwo, workoutToZwo } from '../lib/zwo'
 import { blockDuration, wattsFromPct } from '../lib/workout'
+import { INTENSITY_LEVELS, type WorkoutIntensity } from '../lib/intensity'
 import type { Workout } from '../types'
 
 interface Props {
   workout: Workout
   globalFtp: number
+  intensity: WorkoutIntensity | null
+  intensityLoading?: boolean
   canUndo: boolean
   canRedo: boolean
   onUndo: () => void
@@ -18,6 +21,8 @@ interface Props {
 export function TopBar({
   workout,
   globalFtp,
+  intensity,
+  intensityLoading = false,
   canUndo,
   canRedo,
   onUndo,
@@ -90,6 +95,45 @@ export function TopBar({
         )}
         <p className="topbar-meta">
           Bike · {Math.round(kj)} kJ · FTP {workout.ftp} W
+          {intensityLoading && !intensity ? (
+            <>
+              {' '}
+              ·{' '}
+              <span className="intensity-pill intensity-loading" aria-busy="true" title="Rating difficulty…">
+                <span className="intensity-meter" aria-hidden>
+                  {INTENSITY_LEVELS.map((level) => (
+                    <i key={level.id} />
+                  ))}
+                </span>
+                Rating…
+              </span>
+            </>
+          ) : intensity ? (
+            <>
+              {' '}
+              ·{' '}
+              <span
+                className={`intensity-pill intensity-${intensity.level}${intensityLoading ? ' is-refreshing' : ''}`}
+                title={
+                  intensityLoading
+                    ? 'Updating difficulty…'
+                    : intensity.source === 'decisions'
+                      ? `Difficulty rated by AI (${Math.round(intensity.confidence * 100)}% confidence)`
+                      : 'Difficulty estimate (local)'
+                }
+              >
+                <span className="intensity-meter" aria-hidden>
+                  {INTENSITY_LEVELS.map((level, index) => (
+                    <i
+                      key={level.id}
+                      className={index <= Math.round(intensity.score) ? 'is-on' : ''}
+                    />
+                  ))}
+                </span>
+                {intensity.label}
+              </span>
+            </>
+          ) : null}
         </p>
         {ftpMismatch ? (
           <p className="ftp-banner">

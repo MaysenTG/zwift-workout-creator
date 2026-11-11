@@ -553,6 +553,90 @@ code {
   font-family: var(--mono);
 }
 
+.intensity-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.intensity-pill.intensity-loading {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.intensity-pill.intensity-loading .intensity-meter i {
+  animation: intensity-pulse 1s ease-in-out infinite;
+}
+
+.intensity-pill.intensity-loading .intensity-meter i:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.intensity-pill.intensity-loading .intensity-meter i:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
+.intensity-pill.intensity-loading .intensity-meter i:nth-child(4) {
+  animation-delay: 0.36s;
+}
+
+.intensity-pill.intensity-loading .intensity-meter i:nth-child(5) {
+  animation-delay: 0.48s;
+}
+
+.intensity-pill.is-refreshing {
+  opacity: 0.72;
+}
+
+@keyframes intensity-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.intensity-meter {
+  display: inline-flex;
+  gap: 2px;
+  vertical-align: middle;
+}
+
+.intensity-meter i {
+  width: 4px;
+  height: 10px;
+  background: var(--line-strong);
+  display: inline-block;
+}
+
+.intensity-meter i.is-on {
+  background: var(--ink);
+}
+
+.intensity-easy .intensity-meter i.is-on {
+  background: #3f7d4e;
+}
+
+.intensity-moderate .intensity-meter i.is-on {
+  background: #6b8f3a;
+}
+
+.intensity-challenging .intensity-meter i.is-on {
+  background: #b8860b;
+}
+
+.intensity-hard .intensity-meter i.is-on {
+  background: #c45c26;
+}
+
+.intensity-brutal .intensity-meter i.is-on {
+  background: #a33b2b;
+}
+
 .topbar-error {
   color: var(--accent) !important;
   font-size: 13px;

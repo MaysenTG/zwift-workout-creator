@@ -23,6 +23,7 @@ import { TopBar } from './components/TopBar'
 import { WorkoutChart } from './components/WorkoutChart'
 import { useMediaQuery } from './hooks/useMediaQuery'
 import { useSettings } from './hooks/useSettings'
+import { useWorkoutIntensity } from './hooks/useWorkoutIntensity'
 import { useWorkoutLibrary } from './hooks/useWorkoutLibrary'
 import { uid } from './lib/ids'
 import { BLOCK_LABELS, createBlock } from './lib/workout'
@@ -47,6 +48,7 @@ function App() {
   const { settings, setSettings } = useSettings()
   const library = useWorkoutLibrary(settings)
   const { workout, updateWorkout } = library
+  const { intensity, loading: intensityLoading } = useWorkoutIntensity(workout)
   const sheetMode = useMediaQuery('(max-width: 1100px)')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [activeType, setActiveType] = useState<BlockType | null>(null)
@@ -351,6 +353,8 @@ function App() {
           <TopBar
             workout={workout}
             globalFtp={settings.ftp}
+            intensity={intensity}
+            intensityLoading={intensityLoading}
             canUndo={library.canUndo}
             canRedo={library.canRedo}
             onUndo={library.undo}

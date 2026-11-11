@@ -221,8 +221,174 @@ export default {
       return handleLibrary(request, env, cors)
     }
 
+    if (url.pathname === '/api/score-intensity' && request.method === 'POST') {
+      return handleScoreIntensity(request, env, cors)
+    }
+
     return json({ error: 'Not found' }, 404, cors)
   },
+}
+
+const INTENSITY_LEVELS = [
+  { label: 'easy', description: 'Recovery or very easy endurance; little fatigue cost' },
+  { label: 'moderate', description: 'Steady aerobic work; sustainable for most riders' },
+  { label: 'challenging', description: 'Tempo / sweet spot load; noticeable fatigue' },
+  { label: 'hard', description: 'Threshold or hard VO2 sessions; demanding' },
+  { label: 'brutal', description: 'Very hard race-sim / stacked high-intensity; extreme' },
+] as const
+
+type IntensityScoreResult = {
+  level: string
+  label: string
+  score: number
+  confidence: number
+  source: 'decisions'
+}
+
+/** Isolate-local cache so identical workouts don't re-hit OpenAI. */
+const intensityScoreCache = new Map<string, IntensityScoreResult>()
+const INTENSITY_CACHE_MAX = 80
+
+function intensityCacheKey(workout: { ftp: number; blocks: unknown[] }): string {
+  // Name is cosmetic — score from structure + FTP only.
+  return JSON.stringify({ ftp: workout.ftp, blocks: workout.blocks })
+}
+
+async function handleScoreIntensity(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!env.OPENAI_API_KEY) {
+    return json({ error: 'OPENAI_API_KEY is not configured on the worker.' }, 503, cors)
+  }
+
+  let body: { ftp?: number; name?: string; blocks?: unknown[] }
+  try {
+    body = (await request.json()) as { ftp?: number; name?: string; blocks?: unknown[] }
+  } catch {
+    return json({ error: 'Invalid JSON body.' }, 400, cors)
+  }
+
+  if (!Array.isArray(body.blocks) || body.blocks.length === 0) {
+    return json(
+      {
+        level: 'easy',
+        label: 'Easy',
+        score: 0,
+        confidence: 1,
+        source: 'decisions',
+      },
+      200,
+      cors,
+    )
+  }
+
+  const ftp = Number.isFinite(body.ftp) ? Number(body.ftp) : 200
+  const payload = {
+    name: typeof body.name === 'string' ? body.name : '',
+    ftp,
+    blocks: body.blocks,
+  }
+  const cacheKey = intensityCacheKey(payload)
+  const cached = intensityScoreCache.get(cacheKey)
+  if (cached) {
+    return json(cached, 200, cors)
+  }
+
+  try {
+    const scored = await scoreIntensityWithDecisions(payload, env.OPENAI_API_KEY)
+    if (intensityScoreCache.size >= INTENSITY_CACHE_MAX) {
+      const oldest = intensityScoreCache.keys().next().value
+      if (oldest !== undefined) intensityScoreCache.delete(oldest)
+    }
+    intensityScoreCache.set(cacheKey, scored)
+    return json(scored, 200, cors)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Intensity scoring failed.'
+    return json({ error: message }, 502, cors)
+  }
+}
+
+async function scoreIntensityWithDecisions(
+  workout: { name: string; ftp: number; blocks: unknown[] },
+  apiKey: string,
+): Promise<IntensityScoreResult> {
+  const response = await fetch('https://api.openai.com/v1/decisions', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-6-luna',
+      input: [
+        {
+          role: 'developer',
+          content:
+            'You rate indoor cycling / Zwift workout difficulty for a typical trained amateur. Consider duration, %FTP targets, interval structure, density of hard efforts, and recovery. Warmups/cooldowns matter less than the main set.',
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: 'Rate how difficult this bike workout is overall.',
+            },
+            {
+              type: 'input_json',
+              data: workout,
+            },
+          ],
+        },
+      ],
+      questions: [
+        {
+          type: 'score',
+          name: 'intensity',
+          instructions:
+            'Score overall workout difficulty for a typical trained amateur cyclist completing this indoor session.',
+          levels: INTENSITY_LEVELS.map((level) => ({
+            label: level.label,
+            description: level.description,
+          })),
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const detail = await response.text()
+    throw new Error(`Decisions API error (${response.status}): ${detail.slice(0, 200)}`)
+  }
+
+  const data = (await response.json()) as {
+    answers?: Array<{
+      type?: string
+      name?: string | null
+      score?: number
+      confidence?: number
+      probabilities?: Array<{ label?: string; probability?: number; value?: number }>
+    }>
+  }
+
+  const answer = data.answers?.find((a) => a.name === 'intensity') ?? data.answers?.[0]
+  if (!answer || answer.type !== 'score' || typeof answer.score !== 'number') {
+    throw new Error('Decisions API returned no intensity score.')
+  }
+
+  const score = Math.max(0, Math.min(INTENSITY_LEVELS.length - 1, answer.score))
+  const index = Math.round(score)
+  const level = INTENSITY_LEVELS[index] ?? INTENSITY_LEVELS[0]!
+  const label = level.label.charAt(0).toUpperCase() + level.label.slice(1)
+
+  return {
+    level: level.label,
+    label,
+    score,
+    confidence: typeof answer.confidence === 'number' ? answer.confidence : 0.7,
+    source: 'decisions',
+  }
 }
 
 const LIBRARY_KEY_RE = /^[a-z0-9]{16,64}$/
@@ -416,7 +582,10 @@ async function handleGenerate(
   }
 }
 
-const CLARIFY_ROUTE_CONFIDENCE_FLOOR = 0.55
+/** Only treat as clarify when Decisions is reasonably sure clarification is needed. */
+/** Edit: clarify when fairly sure the target is unclear. Create: only clarify when very sure. */
+const CLARIFY_CONFIDENCE_FLOOR_EDIT = 0.65
+const CLARIFY_CONFIDENCE_FLOOR_CREATE = 0.85
 
 type PromptRoute = 'clarify' | 'generate'
 
@@ -456,11 +625,19 @@ async function decidePromptRouteWithDecisions(
       input: [
         {
           role: 'developer',
-          content: `You route indoor cycling / Zwift workout requests.
-Default to clarify whenever anything important must be guessed.
-Always clarify for vague relative language (more, less, harder, easier, longer, shorter, higher, lower) unless the prompt already states what changes and by how much, or already includes answered clarifying Q&A.
-Single-word or ultra-short requests like "more" or "less" are clarify — never generate.
-Only choose generate when the request is specific enough to build or update the profile without inventing targets or magnitudes.`,
+          content: `You route indoor cycling / Zwift workout requests. Prefer generate.
+
+CREATE (no current workout, or building from scratch):
+- Generate when duration and intent/intensity are clear enough for a coach to build a sensible session.
+- Examples that MUST generate: "45 mins easy", "1 hour sweet spot", "VO2 5x3", "recovery spin 40 minutes", "threshold 3x10".
+- FTP is already provided in context — do not clarify for FTP unless the rider explicitly asks to set/change it and gives no value.
+- Ordinary words like easy / hard / endurance / tempo / sweet spot are enough to choose zones; do not clarify those.
+- Clarify create prompts only when almost nothing actionable is present (e.g. "workout please", "make me something").
+
+EDIT (current workout present):
+- Clarify when the target of a relative change is unclear — e.g. "make interval longer" / "more" / "harder" / "longer" without saying which block(s) or how much.
+- Generate when the edit names what to change and enough detail to apply (e.g. "add 5 min to cooldown", "make the VO2 intervals 10s longer", "bump work bouts +5%").
+- If clarifying Q&A was already answered in the prompt, always generate.`,
         },
         {
           role: 'user',
@@ -485,17 +662,17 @@ Only choose generate when the request is specific enough to build or update the 
           type: 'choice',
           name: 'route',
           instructions:
-            'Is this rider request specific enough to create or update the Zwift workout without guessing? If the request is vague, relative, conflicting, or missing what/how-much (including prompts like "more"), choose clarify.',
+            'Prefer generate. Choose clarify only when an edit target is unclear (which block / how much) or a create request has no usable duration/intent. Do not clarify for FTP, or for ordinary intensity words like easy/hard when duration is given.',
           choices: [
             {
               value: 'clarify',
               description:
-                'Ambiguous or underspecified — ask clarifying questions (e.g. "more", "harder", missing amount/target)',
+                'Need to know which part to change or a missing critical create detail (not FTP; not “easy/hard” alone when time is given)',
             },
             {
               value: 'generate',
               description:
-                'Specific enough — named structure, amounts, or answered clarifications are present',
+                'Enough to build or edit — e.g. “45 mins easy”, named structure, or a clear targeted edit',
             },
           ],
         },
@@ -526,10 +703,10 @@ Only choose generate when the request is specific enough to build or update the 
 
   const choice = String(answer.choice)
   const confidence = typeof answer.confidence === 'number' ? answer.confidence : 1
-  if (choice === 'clarify') return 'clarify'
-  if (choice === 'generate' && confidence >= CLARIFY_ROUTE_CONFIDENCE_FLOOR) return 'generate'
-  // Low-confidence generate → ask questions instead of guessing.
-  return 'clarify'
+  const floor = current ? CLARIFY_CONFIDENCE_FLOOR_EDIT : CLARIFY_CONFIDENCE_FLOOR_CREATE
+  // Bias toward generate — especially for create prompts like "45 mins easy".
+  if (choice === 'clarify' && confidence >= floor) return 'clarify'
+  return 'generate'
 }
 
 const ROUTE_JSON_SCHEMA = {
@@ -574,7 +751,7 @@ async function decidePromptRouteWithChat(
         {
           role: 'system',
           content:
-            'Route Zwift bike workout prompts. Default to clarify. Return clarify for vague/relative requests (more, less, harder, easier, longer, shorter) unless what and how-much are explicit, or clarifying Q&A was already answered. Single-word prompts like "more" are always clarify. Return generate only when specific enough to build or update without guessing.',
+            'Route Zwift bike workout prompts. Prefer generate. CREATE: generate for prompts like "45 mins easy", "1hr sweet spot", "VO2 5x3" — FTP is provided; easy/hard/endurance are enough intensity. Clarify create only when almost no usable detail exists. EDIT: clarify when the target is unclear ("make interval longer", "more", "harder" without which block/how much). Generate clear targeted edits. If clarifying Q&A was already answered, generate.',
         },
         {
           role: 'user',
@@ -594,7 +771,8 @@ ${current ? `Current workout JSON:\n${JSON.stringify(current)}\n\n` : ''}Rider r
   const content = data.choices?.[0]?.message?.content
   if (!content?.trim()) throw new Error('Empty route decision from OpenAI.')
   const parsed = parseModelJsonContent(content) as { route?: string }
-  return parsed.route === 'generate' ? 'generate' : 'clarify'
+  // Prefer generate on ambiguous/unexpected chat output.
+  return parsed.route === 'clarify' ? 'clarify' : 'generate'
 }
 
 const CLARIFY_QUESTIONS_SCHEMA = {
@@ -659,12 +837,9 @@ async function generateClarifyingQuestions(
           content: `You write clarifying questions for a Zwift bike workout builder UI with tappable chips.
 
 Rules:
-- Ask only what is needed to act (usually 1–2 questions, max 3).
-- Every question MUST include 2–5 concrete selectable options. Never leave options empty.
-- Options must be complete answers the rider can tap — e.g. "Work intervals only", "+5% FTP", "+5 minutes total".
-- Never ask yes/no, optional, or fill-in defaults like "none", "0", "n/a", "skip", "no change".
-- Do not ask about cadence, text alerts, FTP, author, or anything unrelated to the ambiguous request.
-- For vague edits like "more"/"less", ask (1) more/less of what and (2) how much — with concrete options tied to the current workout when provided.
+- Ask only what blocks the edit (usually 1–2 questions). Prefer which block/section and how much.
+- Every question MUST include 2–5 concrete selectable options tied to the current workout when provided (e.g. "VO2 intervals", "Steady main set", "+5% FTP", "+2 min each work bout").
+- Never ask for FTP (it is already known), cadence, text alerts, author, or yes/no / "none" / "0" fillers.
 - Do not invent a workout. Questions only.`,
         },
         {
@@ -731,6 +906,7 @@ ${
 - Only set status "clarifying" if you still cannot build the profile without guessing; then leave blocks [] and put 1–3 questions with 2–5 selectable options each.`
 }
 - You may change any part of the workout the rider asks for (structure, power, duration, cadence, text overlays). Prefer targeted edits over rewriting everything.
+- For create prompts like "45 mins easy", use the provided FTP and a sensible easy Z1–Z2 session (warmup / steady / cooldown). Do not refuse or ask for FTP when it is already in the prompt.
 
 Block schema (durations in seconds; power fields are % FTP, not watts; cadence null or rpm; texts always present, often []):
 - warmup, cooldown, ramp: { "type", "durationSec", "startPct", "endPct", "cadence", "texts" }
