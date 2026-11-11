@@ -1,7 +1,9 @@
+import { useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { formatClock, formatMinutes } from '../lib/time'
+import { snapDuration, type DurationSnapSec } from '../lib/settings'
 import { BLOCK_LABELS, blockDuration, maxPowerPct, workoutDuration } from '../lib/workout'
 import { mixZoneColor, zoneForPercent } from '../lib/zones'
 import type { Workout, WorkoutBlock } from '../types'
@@ -10,6 +12,8 @@ interface Props {
   workout: Workout
   selectedId: string | null
   onSelect: (id: string) => void
+  onChangeBlock?: (id: string, patch: Partial<WorkoutBlock>) => void
+  durationSnapSec?: DurationSnapSec
   isGenerating?: boolean
   revealEpoch?: number
 }
@@ -18,6 +22,8 @@ export function WorkoutChart({
   workout,
   selectedId,
   onSelect,
+  onChangeBlock,
+  durationSnapSec = 30,
   isGenerating = false,
   revealEpoch = 0,
 }: Props) {
@@ -31,7 +37,8 @@ export function WorkoutChart({
       <div className="chart-heading">
         <h2>Profile</h2>
         <p>
-          {formatClock(duration)} total · {workout.blocks.length} blocks
+          {formatClock(duration)} total · {workout.blocks.length}{' '}
+          {workout.blocks.length === 1 ? 'block' : 'blocks'}
         </p>
       </div>
 
@@ -72,9 +79,12 @@ export function WorkoutChart({
                       peak={peak}
                       selected={block.id === selectedId}
                       flex={blockDuration(block)}
+                      totalDuration={duration}
                       ftp={workout.ftp}
                       unit={workout.powerUnit}
                       onSelect={onSelect}
+                      onChangeBlock={onChangeBlock}
+                      durationSnapSec={durationSnapSec}
                       revealEpoch={revealEpoch}
                       revealIndex={index}
                     />
@@ -104,9 +114,12 @@ function ChartBlock({
   peak,
   selected,
   flex,
+  totalDuration,
   ftp,
   unit,
   onSelect,
+  onChangeBlock,
+  durationSnapSec,
   revealEpoch,
   revealIndex,
 }: {
@@ -114,22 +127,88 @@ function ChartBlock({
   peak: number
   selected: boolean
   flex: number
+  totalDuration: number
   ftp: number
   unit: Workout['powerUnit']
   onSelect: (id: string) => void
+  onChangeBlock?: (id: string, patch: Partial<WorkoutBlock>) => void
+  durationSnapSec: DurationSnapSec
   revealEpoch: number
   revealIndex: number
 }) {
   const isPreview = String(block.id).startsWith('palette:')
+  const resizingRef = useRef(false)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: block.id,
     data: { from: 'chart', blockType: block.type },
+    disabled: isPreview,
   })
 
   const style = {
     flexGrow: Math.max(flex, 20),
     transform: CSS.Transform.toString(transform),
     transition,
+  }
+
+  const canResize = selected && !isPreview && !!onChangeBlock
+
+  function startPowerResize(event: ReactPointerEvent<HTMLSpanElement>) {
+    if (!onChangeBlock) return
+    event.preventDefault()
+    event.stopPropagation()
+    resizingRef.current = true
+
+    const stage = (event.currentTarget.closest('.chart-stage') as HTMLElement | null) ?? null
+    if (!stage) return
+    const rect = stage.getBoundingClientRect()
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const y = moveEvent.clientY
+      const ratio = 1 - (y - rect.top) / rect.height
+      const pct = clamp(Math.round(ratio * peak * 2) / 2, 0, 300)
+      onChangeBlock(block.id, powerPatch(block, pct))
+    }
+
+    const onUp = () => {
+      resizingRef.current = false
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  function startDurationResize(event: ReactPointerEvent<HTMLSpanElement>) {
+    if (!onChangeBlock) return
+    event.preventDefault()
+    event.stopPropagation()
+    resizingRef.current = true
+
+    const row = event.currentTarget.closest('.chart-blocks') as HTMLElement | null
+    if (!row) return
+    const rowWidth = row.getBoundingClientRect().width
+    const startX = event.clientX
+    const startDuration = blockDuration(block)
+    const otherDuration = Math.max(1, totalDuration - startDuration)
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const deltaPx = moveEvent.clientX - startX
+      const secondsPerPx = totalDuration / Math.max(rowWidth, 1)
+      const raw = startDuration + deltaPx * secondsPerPx
+      const next = clamp(snapDuration(raw, durationSnapSec), 1, 3 * 60 * 60)
+      onChangeBlock(block.id, durationPatch(block, next, durationSnapSec))
+      void otherDuration
+    }
+
+    const onUp = () => {
+      resizingRef.current = false
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
   }
 
   return (
@@ -146,19 +225,79 @@ function ChartBlock({
       onClick={() => {
         if (!isPreview) onSelect(block.id)
       }}
-      {...(isPreview ? {} : listeners)}
+      {...(isPreview || canResize ? {} : listeners)}
       {...attributes}
     >
       <span className="shape-wrap">
         <BlockShape block={block} peak={peak} />
+        {canResize && block.type !== 'freeride' ? (
+          <span
+            className="chart-handle chart-handle-power"
+            role="slider"
+            aria-label="Adjust power"
+            aria-valuemin={0}
+            aria-valuemax={300}
+            tabIndex={0}
+            onPointerDown={startPowerResize}
+          />
+        ) : null}
+        {canResize ? (
+          <span
+            className="chart-handle chart-handle-duration"
+            role="slider"
+            aria-label="Adjust duration"
+            tabIndex={0}
+            onPointerDown={startDurationResize}
+          />
+        ) : null}
       </span>
       <span className="chart-block-meta">
         <em>{BLOCK_LABELS[block.type]}</em>
         <small>{formatMinutes(blockDuration(block))}</small>
         <small>{powerCaption(block, ftp, unit)}</small>
       </span>
+      {canResize ? (
+        <span
+          className="chart-drag-grip"
+          title="Drag to reorder"
+          {...listeners}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : null}
     </button>
   )
+}
+
+function powerPatch(block: WorkoutBlock, pct: number): Partial<WorkoutBlock> {
+  if (block.type === 'steady') return { powerPct: pct }
+  if (block.type === 'intervals') return { onPct: pct }
+  if (block.type === 'freeride') return {}
+  const delta = pct - block.endPct
+  return {
+    startPct: clamp(block.startPct + delta, 0, 300),
+    endPct: pct,
+  }
+}
+
+function durationPatch(
+  block: WorkoutBlock,
+  nextSec: number,
+  snapSec: DurationSnapSec,
+): Partial<WorkoutBlock> {
+  const snapped = snapDuration(nextSec, snapSec)
+  if (block.type === 'intervals') {
+    const cycle = block.onDurationSec + block.offDurationSec
+    if (cycle <= 0) {
+      const half = snapDuration(snapped / block.repeat / 2, snapSec)
+      return { onDurationSec: half, offDurationSec: half }
+    }
+    const scale = snapped / (cycle * block.repeat)
+    return {
+      onDurationSec: snapDuration(block.onDurationSec * scale, snapSec),
+      offDurationSec: snapDuration(block.offDurationSec * scale, snapSec),
+    }
+  }
+  return { durationSec: snapped } as Partial<WorkoutBlock>
 }
 
 function BlockShape({ block, peak }: { block: WorkoutBlock; peak: number }) {
@@ -222,4 +361,9 @@ function powerCaption(block: WorkoutBlock, ftp: number, unit: Workout['powerUnit
   if (block.type === 'freeride') return 'Open'
   if (block.type === 'intervals') return `${fmt(block.onPct)} / ${fmt(block.offPct)}`
   return `${fmt(block.startPct)} → ${fmt(block.endPct)}`
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min
+  return Math.min(max, Math.max(min, value))
 }

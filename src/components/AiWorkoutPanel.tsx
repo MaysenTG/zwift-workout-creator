@@ -25,7 +25,8 @@ interface Props {
 
 export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
   const promptRef = useRef<HTMLTextAreaElement>(null)
-  const [open, setOpen] = useState(true)
+  const userToggledOpenRef = useRef(false)
+  const [open, setOpen] = useState(() => workout.blocks.length === 0)
   const [prompt, setPrompt] = useState('')
   const [loading, setLoading] = useState(false)
   const [stepIndex, setStepIndex] = useState(0)
@@ -50,11 +51,22 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
   }, [loading, onLoadingChange])
 
   useEffect(() => {
+    userToggledOpenRef.current = false
+    setOpen(workout.blocks.length === 0)
+    setChangeSummary(null)
+    setError(null)
+  }, [workout.id])
+
+  useEffect(() => {
     if (prominent) {
       setOpen(true)
       promptRef.current?.focus()
+      return
     }
-  }, [prominent, workout.id])
+    if (!userToggledOpenRef.current) {
+      setOpen(false)
+    }
+  }, [prominent, workout.blocks.length])
 
   useEffect(() => {
     if (!loading) {
@@ -101,6 +113,8 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
         blocks,
       }
       setChangeSummary(summarizeAiWorkoutChange(before, after))
+      userToggledOpenRef.current = true
+      setOpen(true)
       onApply({
         name,
         description,
@@ -130,7 +144,10 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
         <button
           type="button"
           className="ai-panel-toggle"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => {
+            userToggledOpenRef.current = true
+            setOpen((v) => !v)
+          }}
           aria-expanded={open}
         >
           <span className="ai-panel-title">Natural language</span>

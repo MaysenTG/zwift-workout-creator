@@ -13,6 +13,8 @@ export function useSettings() {
       ...current,
       ...patch,
       ftp: patch.ftp !== undefined ? clampFtp(patch.ftp) : current.ftp,
+      durationSnapSec:
+        patch.durationSnapSec !== undefined ? patch.durationSnapSec : current.durationSnapSec,
     }))
   }, [])
 

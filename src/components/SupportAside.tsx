@@ -1,5 +1,4 @@
 import { useEffect } from 'react'
-import { SITE_NAME } from '../lib/site'
 import { ethicalAdsPublisher, supportLink } from '../lib/support'
 
 const ETHICAL_SCRIPT = 'https://media.ethicalads.io/media/client/ethicalads.min.js'
@@ -23,14 +22,16 @@ export function SupportAside() {
     <div className="support-aside">
       {tip ? (
         <p className="support-tip">
-          Enjoying {SITE_NAME}?{' '}
           <a href={tip.href} target="_blank" rel="noopener noreferrer">
             {tip.label}
           </a>
+          <span className="support-tip-sep">·</span>
+          tip jar
         </p>
       ) : null}
       {publisher ? (
         <div className="support-ad" aria-label="Sponsored">
+          <div className="support-ad-label">Sponsored</div>
           <ins
             className="ethicalads"
             data-ea-publisher={publisher}

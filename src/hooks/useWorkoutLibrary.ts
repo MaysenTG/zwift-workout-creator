@@ -7,11 +7,12 @@ import {
   saveWorkout,
   setAllWorkoutsFtp,
 } from '../lib/db'
-import { createWorkout } from '../lib/workout'
+import { createWorkout, workoutDuration } from '../lib/workout'
 import {
-  bumpWorkoutInOrder,
+  ensureWorkoutInOrder,
   initialOrderFromSummaries,
   orderSummaries,
+  prependWorkoutInOrder,
   readWorkoutOrder,
   removeWorkoutFromOrder,
   writeWorkoutOrder,
@@ -132,6 +133,20 @@ export function useWorkoutLibrary(settings: AppSettings) {
 
   useEffect(() => {
     if (!workout) return
+    setSummaries((prev) => {
+      const index = prev.findIndex((item) => item.id === workout.id)
+      const nextSummary: WorkoutSummary = {
+        id: workout.id,
+        name: workout.name,
+        updatedAt: workout.updatedAt,
+        durationSec: workoutDuration(workout.blocks),
+        ftp: workout.ftp,
+      }
+      if (index < 0) return [...prev, nextSummary]
+      const next = [...prev]
+      next[index] = nextSummary
+      return next
+    })
     const handle = window.setTimeout(() => {
       void saveWorkout(workout).then(refresh)
     }, 350)
@@ -144,7 +159,8 @@ export function useWorkoutLibrary(settings: AppSettings) {
       resetHistory()
       setWorkout(next)
       localStorage.setItem(LAST_ID_KEY, next.id)
-      const order = bumpWorkoutInOrder(id)
+      // Keep list order stable while switching — only ensure the id is tracked.
+      const order = ensureWorkoutInOrder(id)
       setSummaries((prev) => orderSummaries(prev, order))
     }
   }, [resetHistory])
@@ -158,7 +174,7 @@ export function useWorkoutLibrary(settings: AppSettings) {
     resetHistory()
     setWorkout(created)
     localStorage.setItem(LAST_ID_KEY, created.id)
-    const order = bumpWorkoutInOrder(created.id)
+    const order = prependWorkoutInOrder(created.id)
     const fetched = await listWorkouts()
     setSummaries(orderSummaries(fetched, order))
   }, [resetHistory, settings.ftp, settings.powerUnit])
@@ -173,7 +189,7 @@ export function useWorkoutLibrary(settings: AppSettings) {
       resetHistory()
       setWorkout(withDefaults)
       localStorage.setItem(LAST_ID_KEY, withDefaults.id)
-      const order = bumpWorkoutInOrder(withDefaults.id)
+      const order = prependWorkoutInOrder(withDefaults.id)
       const fetched = await listWorkouts()
       setSummaries(orderSummaries(fetched, order))
     },

@@ -35,8 +35,18 @@ export function orderSummaries(
   return [...ordered, ...rest]
 }
 
-export function bumpWorkoutInOrder(id: string): string[] {
+/** Put a workout at the top (new / import only — not on open). */
+export function prependWorkoutInOrder(id: string): string[] {
   const next = [id, ...readWorkoutOrder().filter((existing) => existing !== id)]
+  writeWorkoutOrder(next)
+  return next
+}
+
+/** Ensure id exists in the saved order without changing relative positions of others. */
+export function ensureWorkoutInOrder(id: string): string[] {
+  const current = readWorkoutOrder()
+  if (current.includes(id)) return current
+  const next = [...current, id]
   writeWorkoutOrder(next)
   return next
 }

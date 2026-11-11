@@ -21,6 +21,7 @@ import { SeoHead } from './components/SeoHead'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
 import { WorkoutChart } from './components/WorkoutChart'
+import { useMediaQuery } from './hooks/useMediaQuery'
 import { useSettings } from './hooks/useSettings'
 import { useWorkoutLibrary } from './hooks/useWorkoutLibrary'
 import { uid } from './lib/ids'
@@ -46,10 +47,12 @@ function App() {
   const { settings, setSettings } = useSettings()
   const library = useWorkoutLibrary(settings)
   const { workout, updateWorkout } = library
+  const sheetMode = useMediaQuery('(max-width: 1100px)')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [activeType, setActiveType] = useState<BlockType | null>(null)
   const [dragBlocks, setDragBlocks] = useState<WorkoutBlock[] | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [inspectorSheetOpen, setInspectorSheetOpen] = useState(false)
   const [aiGenerating, setAiGenerating] = useState(false)
   const [blockRevealEpoch, setBlockRevealEpoch] = useState(0)
   const skipPaletteClickRef = useRef(false)
@@ -78,6 +81,19 @@ function App() {
       setSelectedId(workout.blocks[0].id)
     }
   }, [workout, selectedId])
+
+  useEffect(() => {
+    if (!sheetMode) setInspectorSheetOpen(false)
+  }, [sheetMode])
+
+  useEffect(() => {
+    if (!sheetMode || !inspectorSheetOpen) return
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setInspectorSheetOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sheetMode, inspectorSheetOpen])
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -117,6 +133,11 @@ function App() {
   function setBlocks(blocks: WorkoutBlock[], nextSelected?: string | null) {
     updateWorkout((current) => ({ ...current, blocks }))
     if (nextSelected !== undefined) setSelectedId(nextSelected)
+  }
+
+  function selectBlock(id: string) {
+    setSelectedId(id)
+    if (sheetMode) setInspectorSheetOpen(true)
   }
 
   function removeBlock(id: string) {
@@ -213,6 +234,7 @@ function App() {
         ),
         committedId,
       )
+      if (sheetMode) setInspectorSheetOpen(true)
       finishPaletteDrag()
       return
     }
@@ -233,6 +255,10 @@ function App() {
   }
 
   const isBlankWorkout = workout.blocks.length === 0
+  const softNewWorkout =
+    isBlankWorkout &&
+    (!workout.name.trim() || workout.name === 'Untitled ride') &&
+    !workout.description.trim()
 
   const aiPanel = (
     <AiWorkoutPanel
@@ -248,6 +274,7 @@ function App() {
         }))
         setBlockRevealEpoch((n) => n + 1)
         setSelectedId(blocks[0]?.id ?? null)
+        if (sheetMode && blocks.length > 0) setInspectorSheetOpen(true)
       }}
     />
   )
@@ -261,6 +288,7 @@ function App() {
         }
         const next = createBlock(type)
         setBlocks([...workout.blocks, next], next.id)
+        if (sheetMode) setInspectorSheetOpen(true)
       }}
     />
   )
@@ -269,9 +297,27 @@ function App() {
     <WorkoutChart
       workout={chartWorkout}
       selectedId={selectedId}
-      onSelect={setSelectedId}
+      onSelect={selectBlock}
+      onChangeBlock={changeBlock}
+      durationSnapSec={settings.durationSnapSec}
       isGenerating={aiGenerating}
       revealEpoch={blockRevealEpoch}
+    />
+  )
+
+  const inspector = (
+    <Inspector
+      workout={workout}
+      globalFtp={settings.ftp}
+      selected={selected}
+      presentation={sheetMode ? 'sheet' : 'rail'}
+      sheetOpen={inspectorSheetOpen}
+      onCloseSheet={() => setInspectorSheetOpen(false)}
+      onChangeMeta={(patch) => patchWorkout(patch)}
+      onChangeBlock={changeBlock}
+      onDuplicate={duplicateBlock}
+      onRemove={removeBlock}
+      onApplyGlobalFtp={library.applyFtpToCurrent}
     />
   )
 
@@ -285,11 +331,12 @@ function App() {
       onDragCancel={finishPaletteDrag}
     >
       <SeoHead workoutName={workout.name} />
-      <div className="app-shell">
+      <div className={`app-shell ${sheetMode ? 'app-shell-sheet' : ''}`}>
         <Sidebar
           summaries={library.summaries}
           activeId={workout.id}
           globalFtp={settings.ftp}
+          softNewWorkout={softNewWorkout}
           onOpen={(id) => void library.openWorkout(id)}
           onNew={() => void library.newWorkout()}
           onOpenSettings={() => setSettingsOpen(true)}
@@ -310,6 +357,7 @@ function App() {
             onRedo={library.redo}
             onApplyGlobalFtp={library.applyFtpToCurrent}
             onImport={(imported) => void library.importWorkout(imported)}
+            onChangeName={(name) => patchWorkout({ name })}
           />
           {isBlankWorkout ? (
             <>
@@ -320,8 +368,6 @@ function App() {
             </>
           ) : (
             <>
-              {palette}
-              {aiPanel}
               <div className="main-chart">{chart}</div>
               <ul className="zone-legend">
                 {POWER_ZONES.map((zone) => (
@@ -331,21 +377,27 @@ function App() {
                   </li>
                 ))}
               </ul>
+              <div className="palette-compact">{palette}</div>
+              {aiPanel}
             </>
           )}
         </main>
 
-        <Inspector
-          workout={workout}
-          globalFtp={settings.ftp}
-          selected={selected}
-          onChangeMeta={(patch) => patchWorkout(patch)}
-          onChangeBlock={changeBlock}
-          onDuplicate={duplicateBlock}
-          onRemove={removeBlock}
-          onApplyGlobalFtp={library.applyFtpToCurrent}
-        />
+        {!sheetMode ? inspector : null}
       </div>
+
+      {sheetMode ? (
+        <>
+          <button
+            type="button"
+            className="inspector-fab"
+            onClick={() => setInspectorSheetOpen(true)}
+          >
+            Edit
+          </button>
+          {inspector}
+        </>
+      ) : null}
 
       <SettingsPanel
         settings={settings}

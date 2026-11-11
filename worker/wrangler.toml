@@ -7,3 +7,9 @@ enabled = true
 
 [dev]
 port = 8787
+
+# ~20 generate calls / minute / client IP
+[[ratelimits]]
+name = "GENERATE_RATE_LIMIT"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { downloadZwo, parseZwo, workoutToZwo } from '../lib/zwo'
 import { blockDuration, wattsFromPct } from '../lib/workout'
 import type { Workout } from '../types'
@@ -12,6 +12,7 @@ interface Props {
   onRedo: () => void
   onApplyGlobalFtp: () => void
   onImport: (workout: Workout) => void
+  onChangeName: (name: string) => void
 }
 
 export function TopBar({
@@ -23,15 +24,25 @@ export function TopBar({
   onRedo,
   onApplyGlobalFtp,
   onImport,
+  onChangeName,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
+  const nameInputRef = useRef<HTMLInputElement>(null)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState(false)
 
   const kj = estimatedKj(workout)
   const ftpMismatch = workout.ftp !== globalFtp
+  const hasBlocks = workout.blocks.length > 0
+  const displayName = workout.name.trim() || 'Untitled ride'
+
+  useEffect(() => {
+    if (editingName) nameInputRef.current?.select()
+  }, [editingName])
 
   async function copyXml() {
+    if (!hasBlocks) return
     await navigator.clipboard.writeText(workoutToZwo(workout))
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1600)
@@ -50,7 +61,33 @@ export function TopBar({
   return (
     <header className="topbar">
       <div className="topbar-main">
-        <h1>{workout.name || 'Untitled ride'}</h1>
+        {editingName ? (
+          <input
+            ref={nameInputRef}
+            className="topbar-name-input"
+            value={workout.name}
+            aria-label="Workout name"
+            onChange={(e) => onChangeName(e.target.value)}
+            onBlur={() => setEditingName(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === 'Escape') {
+                e.preventDefault()
+                setEditingName(false)
+              }
+            }}
+          />
+        ) : (
+          <h1>
+            <button
+              type="button"
+              className="topbar-title-btn"
+              onClick={() => setEditingName(true)}
+              title="Rename workout"
+            >
+              {displayName}
+            </button>
+          </h1>
+        )}
         <p className="topbar-meta">
           Bike · {Math.round(kj)} kJ · FTP {workout.ftp} W
         </p>
@@ -101,10 +138,22 @@ export function TopBar({
           <button type="button" className="ghost" onClick={() => fileRef.current?.click()}>
             Import
           </button>
-          <button type="button" className="ghost" onClick={() => void copyXml()}>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => void copyXml()}
+            disabled={!hasBlocks}
+            title={hasBlocks ? undefined : 'Add blocks before copying'}
+          >
             {copied ? 'Copied' : 'Copy XML'}
           </button>
-          <button type="button" className="primary" onClick={() => downloadZwo(workout)}>
+          <button
+            type="button"
+            className={hasBlocks ? 'primary' : 'ghost'}
+            onClick={() => downloadZwo(workout)}
+            disabled={!hasBlocks}
+            title={hasBlocks ? undefined : 'Add blocks before exporting'}
+          >
             Export for Zwift
           </button>
         </div>

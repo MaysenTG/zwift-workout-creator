@@ -1,4 +1,9 @@
-import { clampFtp, type AppSettings } from '../lib/settings'
+import {
+  clampFtp,
+  DURATION_SNAP_OPTIONS,
+  type AppSettings,
+  type DurationSnapSec,
+} from '../lib/settings'
 
 interface Props {
   settings: AppSettings
@@ -54,7 +59,7 @@ export function SettingsPanel({
         </p>
 
         <label className="field">
-          <span>Edit power as</span>
+          <span>Default power unit (new workouts)</span>
           <select
             value={settings.powerUnit}
             onChange={(e) =>
@@ -65,6 +70,30 @@ export function SettingsPanel({
             <option value="watts">Watts</option>
           </select>
         </label>
+        <p className="modal-copy">
+          The open workout&apos;s unit is edited in the inspector. This only sets the default for
+          new rides.
+        </p>
+
+        <label className="field">
+          <span>Duration drag snap</span>
+          <select
+            value={settings.durationSnapSec}
+            onChange={(e) =>
+              onChange({ durationSnapSec: Number(e.target.value) as DurationSnapSec })
+            }
+          >
+            {DURATION_SNAP_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="modal-copy">
+          When resizing blocks on the profile, durations snap to this step. Choose Off for 1-second
+          precision.
+        </p>
 
         <div className={mismatch ? 'ftp-mismatch' : 'ftp-match'}>
           {mismatch ? (
@@ -78,10 +107,15 @@ export function SettingsPanel({
         </div>
 
         <div className="modal-actions">
-          <button type="button" className="ghost" onClick={onApplyCurrent} disabled={!mismatch}>
+          <button
+            type="button"
+            className={mismatch ? 'primary' : 'ghost'}
+            onClick={onApplyCurrent}
+            disabled={!mismatch}
+          >
             Apply to this workout
           </button>
-          <button type="button" className="primary" onClick={() => void onApplyAll()}>
+          <button type="button" className="ghost" onClick={() => void onApplyAll()}>
             Apply to all saved workouts
           </button>
         </div>

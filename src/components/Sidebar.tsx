@@ -7,6 +7,7 @@ interface Props {
   summaries: WorkoutSummary[]
   activeId: string | undefined
   globalFtp: number
+  softNewWorkout?: boolean
   onOpen: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
@@ -17,6 +18,7 @@ export function Sidebar({
   summaries,
   activeId,
   globalFtp,
+  softNewWorkout = false,
   onOpen,
   onNew,
   onDelete,
@@ -28,13 +30,17 @@ export function Sidebar({
         <p className="site-title">{SITE_NAME}</p>
         <p className="site-tag">{SITE_TAGLINE}</p>
         <p className="site-intro">
-          Build custom Zwift bike workouts in your browser—visual power editor, local library, AI
-          assist, and export for Zwift.
+          Visual Zwift bike workouts—local library, AI assist, export.
         </p>
       </header>
 
       <div className="sidebar-actions">
-        <button type="button" className="primary" onClick={onNew}>
+        <button
+          type="button"
+          className={softNewWorkout ? 'ghost' : 'primary'}
+          onClick={onNew}
+          title={softNewWorkout ? 'Already on a blank workout' : undefined}
+        >
           New workout
         </button>
         <button type="button" className="ghost" onClick={onOpenSettings}>

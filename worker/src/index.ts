@@ -2,6 +2,10 @@ export interface Env {
   OPENAI_API_KEY: string
   /** Comma-separated origins, e.g. https://zwo-builder.pages.dev */
   ALLOWED_ORIGINS?: string
+  /** Cloudflare Workers Rate Limit binding */
+  GENERATE_RATE_LIMIT?: {
+    limit: (options: { key: string }) => Promise<{ success: boolean }>
+  }
 }
 
 type GenerateRequest = {
@@ -150,6 +154,21 @@ async function handleGenerate(
   }
   if (!Number.isFinite(body.ftp) || body.ftp < 50 || body.ftp > 600) {
     return json({ error: 'ftp must be between 50 and 600.' }, 400, cors)
+  }
+
+  if (env.GENERATE_RATE_LIMIT) {
+    const ip =
+      request.headers.get('cf-connecting-ip') ||
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      'anonymous'
+    const { success } = await env.GENERATE_RATE_LIMIT.limit({ key: ip })
+    if (!success) {
+      return json(
+        { error: 'Too many requests. Wait a minute and try again.' },
+        429,
+        cors,
+      )
+    }
   }
 
   const current =

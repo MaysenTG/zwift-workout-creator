@@ -1,0 +1,28 @@
+:root {
+  color-scheme: light;
+  /* Cool instrument desk — not cream stationery, not purple gradient. */
+  --paper: #dfe3e8;
+  --surface: #f4f6f8;
+  --surface-2: #e8ecf0;
+  --ink: #12151a;
+  --muted: #5a6570;
+  --line: #b8c0c9;
+  --line-strong: #7e8a96;
+  --accent: #b33a2b;
+  --accent-hover: #932f23;
+  --signal: #c47a12;
+  --warn-bg: #f2e8df;
+  --warn-border: #c9aa8a;
+  --ok-bg: #dde8df;
+  --font-sans: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+  --radius: 0;
+  font-family: var(--font-sans);
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--ink);
+  background: var(--paper);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}

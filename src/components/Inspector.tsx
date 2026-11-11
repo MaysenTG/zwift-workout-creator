@@ -7,6 +7,9 @@ interface Props {
   workout: Workout
   globalFtp: number
   selected: WorkoutBlock | null
+  presentation: 'rail' | 'sheet'
+  sheetOpen?: boolean
+  onCloseSheet?: () => void
   onChangeMeta: (patch: Partial<Workout>) => void
   onChangeBlock: (id: string, patch: Partial<WorkoutBlock>) => void
   onDuplicate: (id: string) => void
@@ -18,6 +21,9 @@ export function Inspector({
   workout,
   globalFtp,
   selected,
+  presentation,
+  sheetOpen = false,
+  onCloseSheet,
   onChangeMeta,
   onChangeBlock,
   onDuplicate,
@@ -25,34 +31,44 @@ export function Inspector({
   onApplyGlobalFtp,
 }: Props) {
   const ftpMismatch = workout.ftp !== globalFtp
+  const isSheet = presentation === 'sheet'
 
-  return (
-    <aside className="inspector">
-      <h2>Workout</h2>
-      <label className="field">
-        <span>Name</span>
-        <input
-          value={workout.name}
-          onChange={(e) => onChangeMeta({ name: e.target.value })}
+  if (isSheet && !sheetOpen) return null
+
+  const body = (
+    <>
+      {isSheet ? (
+        <div className="inspector-sheet-head">
+          <h2>Edit</h2>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onCloseSheet}
+            aria-label="Close editor"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+
+      {selected ? (
+        <BlockFields
+          block={selected}
+          ftp={workout.ftp}
+          unit={workout.powerUnit}
+          onChange={(patch) => onChangeBlock(selected.id, patch)}
+          onDuplicate={() => onDuplicate(selected.id)}
+          onRemove={() => onRemove(selected.id)}
         />
-      </label>
-      <label className="field">
-        <span>Author</span>
-        <input
-          value={workout.author}
-          placeholder="You"
-          onChange={(e) => onChangeMeta({ author: e.target.value })}
-        />
-      </label>
-      <label className="field">
-        <span>Description</span>
-        <textarea
-          rows={3}
-          value={workout.description}
-          placeholder="What this ride is for"
-          onChange={(e) => onChangeMeta({ description: e.target.value })}
-        />
-      </label>
+      ) : (
+        <p className="inspector-empty">
+          {workout.blocks.length === 0
+            ? 'Use natural language or add blocks to the profile.'
+            : 'Select a block on the profile to edit power and time.'}
+        </p>
+      )}
+
+      <div className="inspector-rule" />
 
       <div className="field-row">
         <label className="field">
@@ -85,30 +101,57 @@ export function Inspector({
             Use global
           </button>
         </div>
-      ) : (
-        <p className="ftp-match-note">Matches global FTP ({globalFtp} W)</p>
-      )}
+      ) : null}
 
-      <div className="inspector-rule" />
-
-      {selected ? (
-        <BlockFields
-          block={selected}
-          ftp={workout.ftp}
-          unit={workout.powerUnit}
-          onChange={(patch) => onChangeBlock(selected.id, patch)}
-          onDuplicate={() => onDuplicate(selected.id)}
-          onRemove={() => onRemove(selected.id)}
-        />
-      ) : (
-        <p className="inspector-empty">
-          {workout.blocks.length === 0
-            ? 'Use natural language above or drag blocks onto the profile.'
-            : 'Select a block on the profile to edit power and time.'}
-        </p>
-      )}
-    </aside>
+      <details className="workout-details">
+        <summary>Workout details</summary>
+        <div className="workout-details-body">
+          <label className="field">
+            <span>Name</span>
+            <input
+              value={workout.name}
+              onChange={(e) => onChangeMeta({ name: e.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span>Author</span>
+            <input
+              value={workout.author}
+              placeholder="You"
+              onChange={(e) => onChangeMeta({ author: e.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span>Description</span>
+            <textarea
+              rows={3}
+              value={workout.description}
+              placeholder="What this ride is for"
+              onChange={(e) => onChangeMeta({ description: e.target.value })}
+            />
+          </label>
+        </div>
+      </details>
+    </>
   )
+
+  if (isSheet) {
+    return (
+      <div className="inspector-sheet-root" role="presentation">
+        <button
+          type="button"
+          className="inspector-sheet-backdrop"
+          aria-label="Close editor"
+          onClick={onCloseSheet}
+        />
+        <aside className="inspector inspector-sheet" role="dialog" aria-label="Block editor">
+          {body}
+        </aside>
+      </div>
+    )
+  }
+
+  return <aside className="inspector">{body}</aside>
 }
 
 function BlockFields({
