@@ -4,13 +4,13 @@ import type { BlockType, Workout, WorkoutBlock } from '../types'
 export function createBlock(type: BlockType): WorkoutBlock {
   switch (type) {
     case 'steady':
-      return { id: uid(), type: 'steady', durationSec: 300, powerPct: 70 }
+      return { id: uid(), type: 'steady', durationSec: 300, powerPct: 70, texts: [] }
     case 'ramp':
-      return { id: uid(), type: 'ramp', durationSec: 300, startPct: 50, endPct: 90 }
+      return { id: uid(), type: 'ramp', durationSec: 300, startPct: 50, endPct: 90, texts: [] }
     case 'warmup':
-      return { id: uid(), type: 'warmup', durationSec: 600, startPct: 40, endPct: 70 }
+      return { id: uid(), type: 'warmup', durationSec: 600, startPct: 40, endPct: 70, texts: [] }
     case 'cooldown':
-      return { id: uid(), type: 'cooldown', durationSec: 480, startPct: 55, endPct: 35 }
+      return { id: uid(), type: 'cooldown', durationSec: 480, startPct: 55, endPct: 35, texts: [] }
     case 'intervals':
       return {
         id: uid(),
@@ -20,10 +20,39 @@ export function createBlock(type: BlockType): WorkoutBlock {
         offDurationSec: 120,
         onPct: 110,
         offPct: 50,
+        texts: [],
       }
     case 'freeride':
-      return { id: uid(), type: 'freeride', durationSec: 300 }
+      return { id: uid(), type: 'freeride', durationSec: 300, texts: [] }
   }
+}
+
+export function blockTexts(block: WorkoutBlock) {
+  return block.texts ?? []
+}
+
+export function clampCadence(value: number): number {
+  if (!Number.isFinite(value)) return 90
+  return Math.min(200, Math.max(30, Math.round(value)))
+}
+
+/** Optional cadence attrs for ZWO export. */
+export function cadenceXmlAttrs(block: WorkoutBlock): string {
+  const parts: string[] = []
+  if (block.type === 'intervals') {
+    if (block.cadence != null) parts.push(`Cadence="${clampCadence(block.cadence)}"`)
+    if (block.cadenceResting != null) {
+      parts.push(`CadenceResting="${clampCadence(block.cadenceResting)}"`)
+    }
+    return parts.length ? ` ${parts.join(' ')}` : ''
+  }
+  if (block.cadenceLow != null && block.cadenceHigh != null) {
+    const low = clampCadence(Math.min(block.cadenceLow, block.cadenceHigh))
+    const high = clampCadence(Math.max(block.cadenceLow, block.cadenceHigh))
+    return ` CadenceLow="${low}" CadenceHigh="${high}"`
+  }
+  if (block.cadence != null) return ` Cadence="${clampCadence(block.cadence)}"`
+  return ''
 }
 
 export function createWorkout(partial?: Partial<Workout>): Workout {

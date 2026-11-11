@@ -1,6 +1,6 @@
-import type { Workout, WorkoutBlock } from '../types'
+import type { TextAlert, Workout, WorkoutBlock } from '../types'
 import { uid } from './ids'
-import { createWorkout } from './workout'
+import { blockTexts, cadenceXmlAttrs, clampCadence, createWorkout } from './workout'
 
 function escapeXml(value: string): string {
   return value
@@ -41,21 +41,92 @@ ${body}
 `
 }
 
+function textEventsXml(texts: TextAlert[]): string {
+  if (texts.length === 0) return ''
+  return texts
+    .filter((t) => t.message.trim())
+    .map((t) => {
+      const duration =
+        t.durationSec !== undefined && t.durationSec > 0
+          ? ` duration="${Math.round(t.durationSec)}"`
+          : ''
+      return `      <textevent timeoffset="${Math.max(0, Math.round(t.timeOffsetSec))}"${duration} message="${escapeXml(t.message.trim())}"/>`
+    })
+    .join('\n')
+}
+
+function wrapBlockXml(openTag: string, texts: TextAlert[]): string {
+  const events = textEventsXml(texts)
+  if (!events) return `    <${openTag}/>`
+  return `    <${openTag}>\n${events}\n    </${openTag.split(' ')[0]}>`
+}
+
 function blockToXml(block: WorkoutBlock): string {
+  const texts = blockTexts(block)
+  const cad = cadenceXmlAttrs(block)
   switch (block.type) {
     case 'steady':
-      return `    <SteadyState Duration="${Math.round(block.durationSec)}" Power="${toFraction(block.powerPct)}"/>`
+      return wrapBlockXml(
+        `SteadyState Duration="${Math.round(block.durationSec)}" Power="${toFraction(block.powerPct)}"${cad}`,
+        texts,
+      )
     case 'ramp':
-      return `    <Ramp Duration="${Math.round(block.durationSec)}" PowerLow="${toFraction(block.startPct)}" PowerHigh="${toFraction(block.endPct)}"/>`
+      return wrapBlockXml(
+        `Ramp Duration="${Math.round(block.durationSec)}" PowerLow="${toFraction(block.startPct)}" PowerHigh="${toFraction(block.endPct)}"${cad}`,
+        texts,
+      )
     case 'warmup':
-      return `    <Warmup Duration="${Math.round(block.durationSec)}" PowerLow="${toFraction(block.startPct)}" PowerHigh="${toFraction(block.endPct)}"/>`
+      return wrapBlockXml(
+        `Warmup Duration="${Math.round(block.durationSec)}" PowerLow="${toFraction(block.startPct)}" PowerHigh="${toFraction(block.endPct)}"${cad}`,
+        texts,
+      )
     case 'cooldown':
-      return `    <Cooldown Duration="${Math.round(block.durationSec)}" PowerLow="${toFraction(block.startPct)}" PowerHigh="${toFraction(block.endPct)}"/>`
+      return wrapBlockXml(
+        `Cooldown Duration="${Math.round(block.durationSec)}" PowerLow="${toFraction(block.startPct)}" PowerHigh="${toFraction(block.endPct)}"${cad}`,
+        texts,
+      )
     case 'intervals':
-      return `    <IntervalsT Repeat="${Math.round(block.repeat)}" OnDuration="${Math.round(block.onDurationSec)}" OffDuration="${Math.round(block.offDurationSec)}" OnPower="${toFraction(block.onPct)}" OffPower="${toFraction(block.offPct)}"/>`
+      return wrapBlockXml(
+        `IntervalsT Repeat="${Math.round(block.repeat)}" OnDuration="${Math.round(block.onDurationSec)}" OffDuration="${Math.round(block.offDurationSec)}" OnPower="${toFraction(block.onPct)}" OffPower="${toFraction(block.offPct)}"${cad}`,
+        texts,
+      )
     case 'freeride':
-      return `    <FreeRide Duration="${Math.round(block.durationSec)}" FlatRoad="0"/>`
+      return wrapBlockXml(
+        `FreeRide Duration="${Math.round(block.durationSec)}" FlatRoad="0"${cad}`,
+        texts,
+      )
   }
+}
+
+function parseCadenceFields(el: Element): {
+  cadence?: number
+  cadenceLow?: number
+  cadenceHigh?: number
+  cadenceResting?: number
+} {
+  const out: {
+    cadence?: number
+    cadenceLow?: number
+    cadenceHigh?: number
+    cadenceResting?: number
+  } = {}
+  const cadence = attr(el, 'Cadence')
+  const low = attr(el, 'CadenceLow')
+  const high = attr(el, 'CadenceHigh')
+  const resting = attr(el, 'CadenceResting')
+  if (cadence != null && cadence !== '' && Number.isFinite(Number(cadence))) {
+    out.cadence = clampCadence(Number(cadence))
+  }
+  if (low != null && low !== '' && Number.isFinite(Number(low))) {
+    out.cadenceLow = clampCadence(Number(low))
+  }
+  if (high != null && high !== '' && Number.isFinite(Number(high))) {
+    out.cadenceHigh = clampCadence(Number(high))
+  }
+  if (resting != null && resting !== '' && Number.isFinite(Number(resting))) {
+    out.cadenceResting = clampCadence(Number(resting))
+  }
+  return out
 }
 
 export function downloadZwo(workout: Workout): void {
@@ -87,9 +158,44 @@ function powerToPct(value: number, ftp: number): number {
   return Math.round(value * 1000) / 10
 }
 
+function parseTextEvents(el: Element): TextAlert[] {
+  const out: TextAlert[] = []
+  for (const child of Array.from(el.children)) {
+    const tag = child.tagName.toLowerCase()
+    // Zwift uses <textevent>; some files also use <TextEvent>.
+    if (tag !== 'textevent') continue
+
+    const message =
+      attr(child, 'message')?.trim() ||
+      attr(child, 'mssage')?.trim() || // known Zwift typo in some files
+      ''
+    if (!message) continue
+
+    const timeOffsetSec = Math.max(
+      0,
+      Math.round(num(child, 'timeoffset', num(child, 'TimeOffset', 0))),
+    )
+    const durationAttr = attr(child, 'duration') ?? attr(child, 'Duration')
+    const durationSec =
+      durationAttr != null && durationAttr !== '' && Number.isFinite(Number(durationAttr))
+        ? Math.max(1, Math.round(Number(durationAttr)))
+        : undefined
+
+    out.push({
+      id: uid(),
+      timeOffsetSec,
+      message,
+      ...(durationSec !== undefined ? { durationSec } : {}),
+    })
+  }
+  return out
+}
+
 function parseBlock(el: Element, ftp: number): WorkoutBlock | null {
   const tag = el.tagName
   const duration = Math.max(1, Math.round(num(el, 'Duration', 60)))
+  const texts = parseTextEvents(el)
+  const cad = parseCadenceFields(el)
 
   if (tag === 'SteadyState' || tag === 'SolidState') {
     const powerLow = attr(el, 'PowerLow')
@@ -101,6 +207,8 @@ function parseBlock(el: Element, ftp: number): WorkoutBlock | null {
         durationSec: duration,
         startPct: powerToPct(Number(powerLow), ftp),
         endPct: powerToPct(Number(powerHigh), ftp),
+        texts,
+        ...pickCadence(cad),
       }
     }
     return {
@@ -108,6 +216,8 @@ function parseBlock(el: Element, ftp: number): WorkoutBlock | null {
       type: 'steady',
       durationSec: duration,
       powerPct: powerToPct(num(el, 'Power', 0.7), ftp),
+      texts,
+      ...pickCadence(cad),
     }
   }
 
@@ -115,7 +225,15 @@ function parseBlock(el: Element, ftp: number): WorkoutBlock | null {
     const start = powerToPct(num(el, 'PowerLow', num(el, 'Power', 0.5)), ftp)
     const end = powerToPct(num(el, 'PowerHigh', num(el, 'Power', 0.8)), ftp)
     const type = tag === 'Warmup' ? 'warmup' : tag === 'Cooldown' ? 'cooldown' : 'ramp'
-    return { id: uid(), type, durationSec: duration, startPct: start, endPct: end }
+    return {
+      id: uid(),
+      type,
+      durationSec: duration,
+      startPct: start,
+      endPct: end,
+      texts,
+      ...pickCadence(cad),
+    }
   }
 
   if (tag === 'IntervalsT') {
@@ -127,14 +245,41 @@ function parseBlock(el: Element, ftp: number): WorkoutBlock | null {
       offDurationSec: Math.max(1, Math.round(num(el, 'OffDuration', 60))),
       onPct: powerToPct(num(el, 'OnPower', 1), ftp),
       offPct: powerToPct(num(el, 'OffPower', 0.5), ftp),
+      texts,
+      ...(cad.cadence != null ? { cadence: cad.cadence } : {}),
+      ...(cad.cadenceResting != null ? { cadenceResting: cad.cadenceResting } : {}),
     }
   }
 
   if (tag === 'FreeRide' || tag === 'Freeride' || tag === 'MaxEffort') {
-    return { id: uid(), type: 'freeride', durationSec: duration }
+    return {
+      id: uid(),
+      type: 'freeride',
+      durationSec: duration,
+      texts,
+      ...pickCadence(cad),
+    }
   }
 
   return null
+}
+
+function pickCadence(cad: {
+  cadence?: number
+  cadenceLow?: number
+  cadenceHigh?: number
+}): Pick<WorkoutBlock, 'cadence' | 'cadenceLow' | 'cadenceHigh'> {
+  const out: Pick<WorkoutBlock, 'cadence' | 'cadenceLow' | 'cadenceHigh'> = {}
+  if (cad.cadenceLow != null && cad.cadenceHigh != null) {
+    out.cadenceLow = cad.cadenceLow
+    out.cadenceHigh = cad.cadenceHigh
+  } else if (cad.cadence != null) {
+    out.cadence = cad.cadence
+  } else {
+    if (cad.cadenceLow != null) out.cadenceLow = cad.cadenceLow
+    if (cad.cadenceHigh != null) out.cadenceHigh = cad.cadenceHigh
+  }
+  return out
 }
 
 export function parseZwo(xml: string, ftp = 200): Workout {

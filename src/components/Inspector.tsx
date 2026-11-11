@@ -1,7 +1,16 @@
-import { BLOCK_LABELS, pctFromWatts, wattsFromPct } from '../lib/workout'
-import { joinDuration, splitDuration } from '../lib/time'
+import { useState } from 'react'
+import { uid } from '../lib/ids'
+import {
+  BLOCK_LABELS,
+  blockDuration,
+  blockTexts,
+  clampCadence,
+  pctFromWatts,
+  wattsFromPct,
+} from '../lib/workout'
+import { formatMinutes, joinDuration, splitDuration } from '../lib/time'
 import { zoneForPercent } from '../lib/zones'
-import type { Workout, WorkoutBlock } from '../types'
+import type { TextAlert, Workout, WorkoutBlock } from '../types'
 
 interface Props {
   workout: Workout
@@ -51,6 +60,50 @@ export function Inspector({
         </div>
       ) : null}
 
+      <div className="inspector-power-bar">
+        <label className="field">
+          <span>FTP</span>
+          <input
+            type="number"
+            min={50}
+            max={600}
+            value={workout.ftp}
+            onChange={(e) => onChangeMeta({ ftp: clamp(Number(e.target.value), 50, 600) })}
+          />
+        </label>
+        <div className="field">
+          <span>Power as</span>
+          <div className="power-unit-toggle" role="group" aria-label="Edit power as">
+            <button
+              type="button"
+              className={workout.powerUnit === 'percent' ? 'is-selected' : ''}
+              aria-pressed={workout.powerUnit === 'percent'}
+              onClick={() => onChangeMeta({ powerUnit: 'percent' })}
+            >
+              % FTP
+            </button>
+            <button
+              type="button"
+              className={workout.powerUnit === 'watts' ? 'is-selected' : ''}
+              aria-pressed={workout.powerUnit === 'watts'}
+              onClick={() => onChangeMeta({ powerUnit: 'watts' })}
+            >
+              Watts
+            </button>
+          </div>
+        </div>
+      </div>
+      {ftpMismatch ? (
+        <div className="ftp-mismatch compact">
+          Global FTP is {globalFtp} W.
+          <button type="button" className="link-btn" onClick={onApplyGlobalFtp}>
+            Use global
+          </button>
+        </div>
+      ) : null}
+
+      <div className="inspector-rule" />
+
       {selected ? (
         <BlockFields
           block={selected}
@@ -67,41 +120,6 @@ export function Inspector({
             : 'Select a block on the profile to edit power and time.'}
         </p>
       )}
-
-      <div className="inspector-rule" />
-
-      <div className="field-row">
-        <label className="field">
-          <span>FTP</span>
-          <input
-            type="number"
-            min={50}
-            max={600}
-            value={workout.ftp}
-            onChange={(e) => onChangeMeta({ ftp: clamp(Number(e.target.value), 50, 600) })}
-          />
-        </label>
-        <label className="field">
-          <span>Edit power as</span>
-          <select
-            value={workout.powerUnit}
-            onChange={(e) =>
-              onChangeMeta({ powerUnit: e.target.value as Workout['powerUnit'] })
-            }
-          >
-            <option value="percent">% FTP</option>
-            <option value="watts">Watts</option>
-          </select>
-        </label>
-      </div>
-      {ftpMismatch ? (
-        <div className="ftp-mismatch compact">
-          Global FTP is {globalFtp} W.
-          <button type="button" className="link-btn" onClick={onApplyGlobalFtp}>
-            Use global
-          </button>
-        </div>
-      ) : null}
 
       <details className="workout-details">
         <summary>Workout details</summary>
@@ -214,42 +232,67 @@ function BlockFields({
 
       {block.type === 'intervals' && (
         <>
-          <label className="field">
-            <span>Repeats</span>
-            <input
-              type="number"
-              min={1}
-              max={40}
-              value={block.repeat}
-              onChange={(e) => onChange({ repeat: clamp(Number(e.target.value), 1, 40) })}
+          <RepeatsField
+            value={block.repeat}
+            onChange={(repeat) => onChange({ repeat })}
+          />
+          <div className="interval-section">
+            <h3 className="interval-section-title">Work (on)</h3>
+            <DurationField
+              label="Duration"
+              seconds={block.onDurationSec}
+              onChange={(onDurationSec) => onChange({ onDurationSec })}
             />
-          </label>
-          <DurationField
-            label="On time"
-            seconds={block.onDurationSec}
-            onChange={(onDurationSec) => onChange({ onDurationSec })}
-          />
-          <PowerField
-            label="On power"
-            pct={block.onPct}
-            ftp={ftp}
-            unit={unit}
-            onChange={(onPct) => onChange({ onPct })}
-          />
-          <DurationField
-            label="Off time"
-            seconds={block.offDurationSec}
-            onChange={(offDurationSec) => onChange({ offDurationSec })}
-          />
-          <PowerField
-            label="Off power"
-            pct={block.offPct}
-            ftp={ftp}
-            unit={unit}
-            onChange={(offPct) => onChange({ offPct })}
-          />
+            <PowerField
+              label="Power"
+              pct={block.onPct}
+              ftp={ftp}
+              unit={unit}
+              onChange={(onPct) => onChange({ onPct })}
+            />
+            <CadenceField
+              label="Cadence"
+              value={block.cadence}
+              onChange={(cadence) => onChange({ cadence })}
+            />
+          </div>
+          <div className="interval-section">
+            <h3 className="interval-section-title">Recovery (off)</h3>
+            <DurationField
+              label="Duration"
+              seconds={block.offDurationSec}
+              onChange={(offDurationSec) => onChange({ offDurationSec })}
+            />
+            <PowerField
+              label="Power"
+              pct={block.offPct}
+              ftp={ftp}
+              unit={unit}
+              onChange={(offPct) => onChange({ offPct })}
+            />
+            <CadenceField
+              label="Cadence"
+              value={block.cadenceResting}
+              onChange={(cadenceResting) => onChange({ cadenceResting })}
+            />
+          </div>
         </>
       )}
+
+      {block.type !== 'intervals' ? (
+        <CadenceTargets
+          cadence={block.cadence}
+          cadenceLow={block.cadenceLow}
+          cadenceHigh={block.cadenceHigh}
+          onChange={onChange}
+        />
+      ) : null}
+
+      <TextAlertsEditor
+        texts={blockTexts(block)}
+        blockDurationSec={blockDuration(block)}
+        onChange={(texts) => onChange({ texts })}
+      />
 
       <div className="inspector-actions">
         <button type="button" className="ghost" onClick={onDuplicate}>
@@ -259,6 +302,247 @@ function BlockFields({
           Remove
         </button>
       </div>
+    </div>
+  )
+}
+
+function TextAlertsEditor({
+  texts,
+  blockDurationSec,
+  onChange,
+}: {
+  texts: TextAlert[]
+  blockDurationSec: number
+  onChange: (texts: TextAlert[]) => void
+}) {
+  function update(id: string, patch: Partial<TextAlert>) {
+    onChange(texts.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  }
+
+  function remove(id: string) {
+    onChange(texts.filter((t) => t.id !== id))
+  }
+
+  function add() {
+    onChange([
+      ...texts,
+      {
+        id: uid(),
+        timeOffsetSec: 0,
+        message: '',
+        durationSec: 10,
+      },
+    ])
+  }
+
+  const maxOffset = Math.max(0, blockDurationSec)
+
+  return (
+    <div className="text-alerts">
+      <div className="text-alerts-head">
+        <strong>Text alerts</strong>
+        <button type="button" className="ghost text-alerts-add" onClick={add}>
+          Add
+        </button>
+      </div>
+      <p className="text-alerts-hint">
+        On-screen cues in Zwift. Time is from the start of this block
+        {maxOffset > 0 ? ` (0–${formatMinutes(maxOffset)})` : ''}.
+      </p>
+      {texts.length === 0 ? (
+        <p className="text-alerts-empty">No on-screen cues yet.</p>
+      ) : (
+        <ul className="text-alerts-list">
+          {texts.map((alert, index) => (
+            <li key={alert.id} className="text-alert-card">
+              <div className="text-alert-card-head">
+                <span className="text-alert-card-label">Cue {index + 1}</span>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`Remove text alert ${index + 1}`}
+                  onClick={() => remove(alert.id)}
+                >
+                  ×
+                </button>
+              </div>
+              <label className="field text-alert-message">
+                <span>Message</span>
+                <input
+                  type="text"
+                  value={alert.message}
+                  placeholder="e.g. High cadence — stay smooth"
+                  onChange={(e) => update(alert.id, { message: e.target.value })}
+                />
+              </label>
+              <DurationField
+                label="Appear at"
+                seconds={alert.timeOffsetSec}
+                onChange={(timeOffsetSec) =>
+                  update(alert.id, {
+                    timeOffsetSec: clamp(timeOffsetSec, 0, maxOffset || timeOffsetSec),
+                  })
+                }
+              />
+              <DurationField
+                label="Show for"
+                seconds={alert.durationSec ?? 10}
+                onChange={(durationSec) =>
+                  update(alert.id, {
+                    durationSec: clamp(durationSec, 1, 300),
+                  })
+                }
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function RepeatsField({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (value: number) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const display = draft ?? String(value)
+
+  function commit(raw: string) {
+    if (raw.trim() === '') {
+      onChange(1)
+      setDraft(null)
+      return
+    }
+    const next = Number(raw)
+    if (!Number.isFinite(next)) {
+      setDraft(null)
+      return
+    }
+    onChange(clamp(Math.round(next), 1, 40))
+    setDraft(null)
+  }
+
+  return (
+    <label className="field">
+      <span>Repeats</span>
+      <input
+        type="number"
+        min={1}
+        max={40}
+        value={display}
+        onChange={(e) => {
+          const raw = e.target.value
+          setDraft(raw)
+          if (raw.trim() === '') return
+          const next = Number(raw)
+          if (Number.isFinite(next) && next >= 1) {
+            onChange(clamp(Math.round(next), 1, 40))
+          }
+        }}
+        onBlur={() => commit(draft ?? String(value))}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.currentTarget.blur()
+          }
+        }}
+      />
+    </label>
+  )
+}
+
+function CadenceField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: number | undefined
+  onChange: (value: number | undefined) => void
+}) {
+  return (
+    <label className="field">
+      <span>{label} (rpm)</span>
+      <input
+        type="number"
+        min={30}
+        max={200}
+        placeholder="None"
+        value={value ?? ''}
+        onChange={(e) => {
+          const raw = e.target.value
+          if (raw === '') onChange(undefined)
+          else onChange(clampCadence(Number(raw)))
+        }}
+      />
+    </label>
+  )
+}
+
+function CadenceTargets({
+  cadence,
+  cadenceLow,
+  cadenceHigh,
+  onChange,
+}: {
+  cadence: number | undefined
+  cadenceLow: number | undefined
+  cadenceHigh: number | undefined
+  onChange: (patch: Partial<WorkoutBlock>) => void
+}) {
+  const useRange = cadenceLow != null || cadenceHigh != null
+
+  return (
+    <div className="cadence-targets">
+      <div className="cadence-targets-head">
+        <strong>Cadence</strong>
+        <label className="cadence-range-toggle">
+          <input
+            type="checkbox"
+            checked={useRange}
+            onChange={(e) => {
+              if (e.target.checked) {
+                const mid = cadence ?? 90
+                onChange({
+                  cadence: undefined,
+                  cadenceLow: mid - 5,
+                  cadenceHigh: mid + 5,
+                })
+              } else {
+                onChange({
+                  cadence: cadenceLow ?? cadenceHigh ?? cadence,
+                  cadenceLow: undefined,
+                  cadenceHigh: undefined,
+                })
+              }
+            }}
+          />
+          Range
+        </label>
+      </div>
+      {useRange ? (
+        <div className="field-row">
+          <CadenceField
+            label="Low"
+            value={cadenceLow}
+            onChange={(next) => onChange({ cadenceLow: next })}
+          />
+          <CadenceField
+            label="High"
+            value={cadenceHigh}
+            onChange={(next) => onChange({ cadenceHigh: next })}
+          />
+        </div>
+      ) : (
+        <CadenceField
+          label="Target"
+          value={cadence}
+          onChange={(next) => onChange({ cadence: next })}
+        />
+      )}
     </div>
   )
 }

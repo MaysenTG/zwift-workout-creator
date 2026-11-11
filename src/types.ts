@@ -8,8 +8,25 @@ export type BlockType =
 
 export type PowerUnit = 'percent' | 'watts'
 
+/** Zwift `<textevent>` — on-screen cue relative to the parent block. */
+export interface TextAlert {
+  id: string
+  /** Seconds from the start of this block (for IntervalsT, from the interval step start). */
+  timeOffsetSec: number
+  message: string
+  /** Optional seconds the cue stays on screen in Zwift. */
+  durationSec?: number
+}
+
 interface BlockBase {
   id: string
+  texts?: TextAlert[]
+  /** Single cadence target (rpm) → ZWO `Cadence`. */
+  cadence?: number
+  /** Cadence range low (rpm) → `CadenceLow` when paired with cadenceHigh. */
+  cadenceLow?: number
+  /** Cadence range high (rpm) → `CadenceHigh` when paired with cadenceLow. */
+  cadenceHigh?: number
 }
 
 export interface SteadyBlock extends BlockBase {
@@ -32,6 +49,8 @@ export interface IntervalsBlock extends BlockBase {
   offDurationSec: number
   onPct: number
   offPct: number
+  /** Recovery cadence (rpm) → ZWO `CadenceResting`. Work uses `cadence`. */
+  cadenceResting?: number
 }
 
 export interface FreeRideBlock extends BlockBase {

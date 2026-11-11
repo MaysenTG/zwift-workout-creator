@@ -6,36 +6,56 @@ export function apiUrl(path: string): string {
   return `${base}${path.startsWith('/') ? path : `/${path}`}`
 }
 
+export type GeneratedTextAlertPayload = {
+  timeOffsetSec: number
+  message: string
+  durationSec?: number
+}
+
+type GeneratedBlockBase = {
+  cadence?: number
+  texts?: GeneratedTextAlertPayload[]
+}
+
 export type GeneratedBlockPayload =
-  | {
+  | (GeneratedBlockBase & {
       type: 'steady'
       durationSec: number
       powerPct: number
-    }
-  | {
+    })
+  | (GeneratedBlockBase & {
       type: 'ramp' | 'warmup' | 'cooldown'
       durationSec: number
       startPct: number
       endPct: number
-    }
-  | {
+    })
+  | (GeneratedBlockBase & {
       type: 'intervals'
       repeat: number
       onDurationSec: number
       offDurationSec: number
       onPct: number
       offPct: number
-    }
-  | {
+      cadenceResting?: number
+    })
+  | (GeneratedBlockBase & {
       type: 'freeride'
       durationSec: number
-    }
+    })
+
+export type ClarifyingQuestion = {
+  prompt: string
+  /** Short selectable answers; empty means free text only. */
+  options: string[]
+}
 
 export type GenerateWorkoutResponse = {
+  status?: 'workout' | 'clarifying'
   name: string
   description: string
   blocks: GeneratedBlockPayload[]
   ftp?: number
+  questions?: ClarifyingQuestion[]
 }
 
 export type AiWorkoutContext = {
@@ -114,14 +134,35 @@ function errorFromResponse(status: number, serverMessage?: string): GenerateWork
   })
 }
 
+export type ClarificationAnswerPayload = {
+  question: string
+  answer: string
+}
+
 export async function generateWorkoutFromPrompt(
   prompt: string,
   ftp: number,
   current?: AiWorkoutContext,
+  options?: {
+    resolvedClarifications?: boolean
+    clarifications?: ClarificationAnswerPayload[]
+  },
 ): Promise<GenerateWorkoutResponse> {
-  const payload: { prompt: string; ftp: number; current?: AiWorkoutContext } = { prompt, ftp }
+  const payload: {
+    prompt: string
+    ftp: number
+    current?: AiWorkoutContext
+    resolvedClarifications?: boolean
+    clarifications?: ClarificationAnswerPayload[]
+  } = { prompt, ftp }
   if (current) {
     payload.current = current
+  }
+  if (options?.resolvedClarifications) {
+    payload.resolvedClarifications = true
+  }
+  if (options?.clarifications?.length) {
+    payload.clarifications = options.clarifications
   }
 
   let res: Response
@@ -168,6 +209,16 @@ export async function generateWorkoutFromPrompt(
   }
 
   const normalized = normalizeGenerateWorkoutResponse(data)
+
+  if (normalized.status === 'clarifying') {
+    if (!normalized.questions?.length) {
+      throw new GenerateWorkoutError({
+        title: 'Need more detail',
+        message: 'The AI asked for clarification but returned no questions.',
+      })
+    }
+    return normalized
+  }
 
   if (!Array.isArray(normalized.blocks) || normalized.blocks.length === 0) {
     throw new GenerateWorkoutError({

@@ -1,16 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { generateWorkoutFromPrompt, getGenerateWorkoutErrorInfo } from '../lib/api'
+import {
+  generateWorkoutFromPrompt,
+  getGenerateWorkoutErrorInfo,
+  type ClarifyingQuestion,
+} from '../lib/api'
 import { blocksFromAiPayload, isFreshAiWorkout, workoutToAiContext } from '../lib/aiBlocks'
 import { summarizeAiWorkoutChange } from '../lib/workoutDiff'
 import type { Workout, WorkoutBlock } from '../types'
 
 const LOADING_STEPS = [
   'Reading your request…',
+  'Checking for missing details…',
   'Planning intervals…',
   'Setting power targets…',
-  'Balancing duration…',
   'Almost ready…',
 ]
+
+type ClarifyingAnswer = {
+  /** Selected preset option, or null when using free text / unanswered. */
+  option: string | null
+  /** True when the rider chose "Other" (or the question has no options). */
+  useOther: boolean
+  other: string
+}
 
 interface Props {
   workout: Workout
@@ -21,6 +33,24 @@ interface Props {
     ftp?: number
   }) => void
   onLoadingChange: (loading: boolean) => void
+}
+
+function emptyAnswers(questions: ClarifyingQuestion[]): ClarifyingAnswer[] {
+  return questions.map((q) => ({
+    option: null,
+    useOther: q.options.length === 0,
+    other: '',
+  }))
+}
+
+function answerResolved(answer: ClarifyingAnswer): boolean {
+  if (answer.useOther) return answer.other.trim().length > 0
+  return Boolean(answer.option?.trim())
+}
+
+function answerText(answer: ClarifyingAnswer): string {
+  if (answer.useOther) return answer.other.trim()
+  return answer.option?.trim() ?? ''
 }
 
 export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
@@ -34,9 +64,18 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
     null,
   )
   const [changeSummary, setChangeSummary] = useState<string[] | null>(null)
+  const [clarifying, setClarifying] = useState<{
+    originalPrompt: string
+    questions: ClarifyingQuestion[]
+  } | null>(null)
+  const [clarifyingAnswers, setClarifyingAnswers] = useState<ClarifyingAnswer[]>([])
 
   const hasBlocks = workout.blocks.length > 0
   const prominent = !hasBlocks
+  const clarificationsReady =
+    Boolean(clarifying) &&
+    clarifyingAnswers.length === (clarifying?.questions.length ?? 0) &&
+    clarifyingAnswers.every(answerResolved)
 
   const placeholder = useMemo(
     () =>
@@ -55,6 +94,8 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
     setOpen(workout.blocks.length === 0)
     setChangeSummary(null)
     setError(null)
+    setClarifying(null)
+    setClarifyingAnswers([])
   }, [workout.id])
 
   useEffect(() => {
@@ -79,8 +120,14 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
     return () => window.clearInterval(timer)
   }, [loading])
 
-  async function submit() {
-    const text = prompt.trim()
+  async function runGenerate(
+    text: string,
+    options?: {
+      resolvedClarifications?: boolean
+      clarifications?: { question: string; answer: string }[]
+      originalPrompt?: string
+    },
+  ) {
     if (!text || loading) return
 
     setError(null)
@@ -99,7 +146,30 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
         text,
         workout.ftp,
         isFreshAiWorkout(workout) ? undefined : workoutToAiContext(workout),
+        {
+          resolvedClarifications: options?.resolvedClarifications,
+          clarifications: options?.clarifications,
+        },
       )
+
+      if (result.status === 'clarifying' && result.questions?.length) {
+        // Never reopen clarify after the rider already answered.
+        if (options?.resolvedClarifications) {
+          throw new Error('Still needed more detail after your answers. Try a more specific request.')
+        }
+        setClarifying({
+          originalPrompt: options?.originalPrompt || clarifying?.originalPrompt || text,
+          questions: result.questions,
+        })
+        setClarifyingAnswers(emptyAnswers(result.questions))
+        userToggledOpenRef.current = true
+        setOpen(true)
+        return
+      }
+
+      setClarifying(null)
+      setClarifyingAnswers([])
+      setPrompt('')
       const blocks = blocksFromAiPayload(result.blocks)
       const name =
         result.name.trim() ||
@@ -126,6 +196,33 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function submit() {
+    const text = prompt.trim()
+    if (!text) return
+    setClarifying(null)
+    setClarifyingAnswers([])
+    await runGenerate(text)
+  }
+
+  async function submitClarifications() {
+    if (!clarifying || !clarificationsReady) return
+    const clarifications = clarifying.questions.map((q, i) => ({
+      question: q.prompt,
+      answer: answerText(clarifyingAnswers[i]!),
+    }))
+    await runGenerate(clarifying.originalPrompt, {
+      resolvedClarifications: true,
+      clarifications,
+      originalPrompt: clarifying.originalPrompt,
+    })
+  }
+
+  function updateAnswer(index: number, patch: Partial<ClarifyingAnswer>) {
+    setClarifyingAnswers((prev) =>
+      prev.map((answer, i) => (i === index ? { ...answer, ...patch } : answer)),
+    )
   }
 
   return (
@@ -163,33 +260,139 @@ export function AiWorkoutPanel({ workout, onApply, onLoadingChange }: Props) {
             </p>
           ) : null}
 
-          <textarea
-            ref={promptRef}
-            className="ai-prompt"
-            rows={prominent ? 5 : 3}
-            value={prompt}
-            disabled={loading}
-            placeholder={placeholder}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault()
-                void submit()
-              }
-            }}
-          />
+          {clarifying ? (
+            <div className="ai-clarify" role="status">
+              <strong>A few details before generating</strong>
+              <p className="ai-clarify-lead">Tap an option — or Other to type your own.</p>
+              <ul className="ai-clarify-list">
+                {clarifying.questions.map((question, index) => {
+                  const answer = clarifyingAnswers[index] ?? {
+                    option: null,
+                    useOther: question.options.length === 0,
+                    other: '',
+                  }
+                  return (
+                    <li key={`${index}-${question.prompt}`} className="ai-clarify-item">
+                      <p className="ai-clarify-prompt">{question.prompt}</p>
+                      {question.options.length > 0 ? (
+                        <div className="ai-clarify-options" role="group" aria-label={question.prompt}>
+                          {question.options.map((option) => {
+                            const selected = !answer.useOther && answer.option === option
+                            return (
+                              <button
+                                key={option}
+                                type="button"
+                                className={`ai-clarify-option ${selected ? 'is-selected' : ''}`}
+                                disabled={loading}
+                                aria-pressed={selected}
+                                onClick={() =>
+                                  updateAnswer(index, {
+                                    option,
+                                    useOther: false,
+                                    other: '',
+                                  })
+                                }
+                              >
+                                {option}
+                              </button>
+                            )
+                          })}
+                          <button
+                            type="button"
+                            className={`ai-clarify-option ${answer.useOther ? 'is-selected' : ''}`}
+                            disabled={loading}
+                            aria-pressed={answer.useOther}
+                            onClick={() =>
+                              updateAnswer(index, { option: null, useOther: true })
+                            }
+                          >
+                            Other
+                          </button>
+                        </div>
+                      ) : null}
+                      {answer.useOther ? (
+                        <input
+                          type="text"
+                          className="ai-clarify-other"
+                          value={answer.other}
+                          disabled={loading}
+                          placeholder={
+                            question.options.length > 0
+                              ? 'Type your own answer…'
+                              : 'Your answer…'
+                          }
+                          onChange={(e) =>
+                            updateAnswer(index, {
+                              option: null,
+                              useOther: true,
+                              other: e.target.value,
+                            })
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                              e.preventDefault()
+                              void submitClarifications()
+                            }
+                          }}
+                        />
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ul>
+              <div className="ai-panel-foot">
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={loading}
+                  onClick={() => {
+                    setClarifying(null)
+                    setClarifyingAnswers([])
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="primary ai-submit"
+                  disabled={loading || !clarificationsReady}
+                  onClick={() => void submitClarifications()}
+                >
+                  {loading ? 'Generating…' : 'Continue'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <textarea
+                ref={promptRef}
+                className="ai-prompt"
+                rows={prominent ? 5 : 3}
+                value={prompt}
+                disabled={loading}
+                placeholder={placeholder}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault()
+                    void submit()
+                  }
+                }}
+              />
 
-          <div className="ai-panel-foot">
-            <span className="ai-hint">Ctrl+Enter to generate</span>
-            <button
-              type="button"
-              className="primary ai-submit"
-              disabled={loading || !prompt.trim()}
-              onClick={() => void submit()}
-            >
-              {loading ? 'Generating…' : prominent ? 'Generate workout' : 'Generate'}
-            </button>
-          </div>
+              <div className="ai-panel-foot">
+                <span className="ai-hint">Ctrl+Enter to generate</span>
+                <button
+                  type="button"
+                  className="primary ai-submit"
+                  disabled={loading || !prompt.trim()}
+                  onClick={() => void submit()}
+                >
+                  {loading ? 'Generating…' : prominent ? 'Generate workout' : 'Generate'}
+                </button>
+              </div>
+            </>
+          )}
 
           {loading ? (
             <div className="ai-inline-loader" aria-live="polite">

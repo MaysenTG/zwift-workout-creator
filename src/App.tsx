@@ -403,6 +403,9 @@ function App() {
         settings={settings}
         workoutFtp={workout.ftp}
         open={settingsOpen}
+        cloudStatus={library.cloudStatus}
+        libraryKeyDisplay={library.libraryKeyDisplay}
+        libraryHref={library.libraryHref}
         onClose={() => setSettingsOpen(false)}
         onChange={setSettings}
         onApplyCurrent={() => {
@@ -411,6 +414,8 @@ function App() {
         onApplyAll={() => {
           void library.applyFtpToAll()
         }}
+        onOpenLibraryKey={(code) => library.openLibraryKey(code)}
+        onSyncNow={() => library.syncNow()}
       />
 
       <DragOverlay>

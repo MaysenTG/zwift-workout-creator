@@ -1,8 +1,8 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { Workout, WorkoutSummary } from '../types'
 import { workoutDuration } from './workout'
+import { readLibraryKey } from './libraryKey'
 
-const DB_NAME = 'wattline'
 const DB_VERSION = 1
 const STORE = 'workouts'
 
@@ -14,18 +14,25 @@ interface WattlineDB extends DBSchema {
   }
 }
 
-let dbPromise: Promise<IDBPDatabase<WattlineDB>> | null = null
+const dbPromises = new Map<string, Promise<IDBPDatabase<WattlineDB>>>()
+
+function activeKey(): string {
+  return readLibraryKey() ?? 'local'
+}
 
 function getDb() {
-  if (!dbPromise) {
-    dbPromise = openDB<WattlineDB>(DB_NAME, DB_VERSION, {
+  const key = activeKey()
+  let promise = dbPromises.get(key)
+  if (!promise) {
+    promise = openDB<WattlineDB>(`wattline:${key}`, DB_VERSION, {
       upgrade(db) {
         const store = db.createObjectStore(STORE, { keyPath: 'id' })
         store.createIndex('by-updated', 'updatedAt')
       },
     })
+    dbPromises.set(key, promise)
   }
-  return dbPromise
+  return promise
 }
 
 export async function listWorkouts(): Promise<WorkoutSummary[]> {
@@ -63,4 +70,20 @@ export async function setAllWorkoutsFtp(ftp: number): Promise<void> {
     if (workout.ftp === ftp) continue
     await db.put(STORE, { ...workout, ftp, updatedAt: now })
   }
+}
+
+export async function getAllWorkouts(): Promise<Workout[]> {
+  const db = await getDb()
+  return db.getAll(STORE)
+}
+
+/** Replace the entire local library (used for cloud restore / pull). */
+export async function replaceAllWorkouts(workouts: Workout[]): Promise<void> {
+  const db = await getDb()
+  const tx = db.transaction(STORE, 'readwrite')
+  await tx.store.clear()
+  for (const workout of workouts) {
+    await tx.store.put(workout)
+  }
+  await tx.done
 }

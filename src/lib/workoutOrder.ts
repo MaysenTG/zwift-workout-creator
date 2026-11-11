@@ -1,10 +1,13 @@
 import type { WorkoutSummary } from '../types'
+import { readLibraryKey } from './libraryKey'
 
-const ORDER_KEY = 'wattline:workout-order'
+function orderStorageKey(): string {
+  return `wattline:${readLibraryKey() ?? 'local'}:order`
+}
 
 export function readWorkoutOrder(): string[] {
   try {
-    const raw = localStorage.getItem(ORDER_KEY)
+    const raw = localStorage.getItem(orderStorageKey())
     if (!raw) return []
     const parsed = JSON.parse(raw) as unknown
     return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
@@ -14,7 +17,7 @@ export function readWorkoutOrder(): string[] {
 }
 
 export function writeWorkoutOrder(ids: string[]): void {
-  localStorage.setItem(ORDER_KEY, JSON.stringify(ids))
+  localStorage.setItem(orderStorageKey(), JSON.stringify(ids))
 }
 
 /** Stable sidebar order: known ids first, then any new workouts by most recently updated. */

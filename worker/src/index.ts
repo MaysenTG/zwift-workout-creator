@@ -6,11 +6,23 @@ export interface Env {
   GENERATE_RATE_LIMIT?: {
     limit: (options: { key: string }) => Promise<{ success: boolean }>
   }
+  /** Per–backup-code workout library (Durable Object) */
+  LIBRARY: DurableObjectNamespace
+}
+
+export { LibraryDO } from './libraryDo'
+
+type ClarificationAnswer = {
+  question: string
+  answer: string
 }
 
 type GenerateRequest = {
   prompt: string
   ftp: number
+  /** When true, skip ambiguity routing and generate from prompt + clarifications. */
+  resolvedClarifications?: boolean
+  clarifications?: ClarificationAnswer[]
   current?: {
     name: string
     description: string
@@ -19,14 +31,54 @@ type GenerateRequest = {
   }
 }
 
+type ClarifyingQuestion = {
+  prompt: string
+  options: string[]
+}
+
 type GeneratedWorkout = {
+  status: 'workout' | 'clarifying'
   name: string
   description: string
   ftp?: number
   blocks: unknown[]
+  questions: ClarifyingQuestion[]
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' }
+
+const nullableCadence = {
+  anyOf: [{ type: 'number' }, { type: 'null' }],
+  description: 'Cadence target in rpm, or null if not specified',
+} as const
+
+const nullableDurationSec = {
+  anyOf: [{ type: 'number' }, { type: 'null' }],
+  description: 'Seconds the cue stays on screen in Zwift, or null for default (~10s)',
+} as const
+
+/** On-screen Zwift `<textevent>` cues nested under a block. */
+const textsField = {
+  type: 'array',
+  description:
+    'On-screen text overlays for this block (Zwift textevents). Use [] when none. Prefer short coaching cues at useful offsets.',
+  items: {
+    type: 'object',
+    properties: {
+      timeOffsetSec: {
+        type: 'number',
+        description: 'Seconds from the start of this block (0 = start)',
+      },
+      message: {
+        type: 'string',
+        description: 'Short on-screen message shown in Zwift',
+      },
+      durationSec: nullableDurationSec,
+    },
+    required: ['timeOffsetSec', 'message', 'durationSec'],
+    additionalProperties: false,
+  },
+} as const
 
 /** OpenAI Structured Outputs — model must return this exact JSON shape. */
 const WORKOUT_JSON_SCHEMA = {
@@ -35,7 +87,13 @@ const WORKOUT_JSON_SCHEMA = {
   schema: {
     type: 'object',
     properties: {
-      name: { type: 'string', description: 'Short workout title' },
+      status: {
+        type: 'string',
+        enum: ['workout', 'clarifying'],
+        description:
+          'workout = full profile ready; clarifying = ask questions instead of inventing missing details',
+      },
+      name: { type: 'string', description: 'Short workout title (placeholder OK when clarifying)' },
       description: {
         type: 'string',
         description: 'One or two sentences: goal, intensity, duration feel',
@@ -44,6 +102,28 @@ const WORKOUT_JSON_SCHEMA = {
         type: 'number',
         description:
           'Workout FTP in watts (50–600). Use the rider FTP from the prompt unless the user asks to change it.',
+      },
+      questions: {
+        type: 'array',
+        description:
+          'Clarifying questions when status is clarifying; empty array when status is workout',
+        items: {
+          type: 'object',
+          properties: {
+            prompt: {
+              type: 'string',
+              description: 'Short concrete question for the rider',
+            },
+            options: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                '2–5 short selectable answers (preferred). Use [] only when free text is truly required.',
+            },
+          },
+          required: ['prompt', 'options'],
+          additionalProperties: false,
+        },
       },
       blocks: {
         type: 'array',
@@ -55,8 +135,10 @@ const WORKOUT_JSON_SCHEMA = {
                 type: { type: 'string', const: 'steady' },
                 durationSec: { type: 'number' },
                 powerPct: { type: 'number' },
+                cadence: nullableCadence,
+                texts: textsField,
               },
-              required: ['type', 'durationSec', 'powerPct'],
+              required: ['type', 'durationSec', 'powerPct', 'cadence', 'texts'],
               additionalProperties: false,
             },
             {
@@ -66,8 +148,10 @@ const WORKOUT_JSON_SCHEMA = {
                 durationSec: { type: 'number' },
                 startPct: { type: 'number' },
                 endPct: { type: 'number' },
+                cadence: nullableCadence,
+                texts: textsField,
               },
-              required: ['type', 'durationSec', 'startPct', 'endPct'],
+              required: ['type', 'durationSec', 'startPct', 'endPct', 'cadence', 'texts'],
               additionalProperties: false,
             },
             {
@@ -79,6 +163,9 @@ const WORKOUT_JSON_SCHEMA = {
                 offDurationSec: { type: 'number' },
                 onPct: { type: 'number' },
                 offPct: { type: 'number' },
+                cadence: nullableCadence,
+                cadenceResting: nullableCadence,
+                texts: textsField,
               },
               required: [
                 'type',
@@ -87,6 +174,9 @@ const WORKOUT_JSON_SCHEMA = {
                 'offDurationSec',
                 'onPct',
                 'offPct',
+                'cadence',
+                'cadenceResting',
+                'texts',
               ],
               additionalProperties: false,
             },
@@ -95,15 +185,17 @@ const WORKOUT_JSON_SCHEMA = {
               properties: {
                 type: { type: 'string', const: 'freeride' },
                 durationSec: { type: 'number' },
+                cadence: nullableCadence,
+                texts: textsField,
               },
-              required: ['type', 'durationSec'],
+              required: ['type', 'durationSec', 'cadence', 'texts'],
               additionalProperties: false,
             },
           ],
         },
       },
     },
-    required: ['name', 'description', 'ftp', 'blocks'],
+    required: ['status', 'name', 'description', 'ftp', 'questions', 'blocks'],
     additionalProperties: false,
   },
 } as const
@@ -125,8 +217,50 @@ export default {
       return handleGenerate(request, env, cors)
     }
 
+    if (url.pathname === '/api/library' && (request.method === 'GET' || request.method === 'PUT')) {
+      return handleLibrary(request, env, cors)
+    }
+
     return json({ error: 'Not found' }, 404, cors)
   },
+}
+
+const LIBRARY_KEY_RE = /^[a-z0-9]{16,64}$/
+
+async function handleLibrary(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const key = libraryKeyFromRequest(request)
+  if (!key) {
+    return json(
+      { error: 'Missing or invalid library key. Send X-Library-Key with your backup code.' },
+      401,
+      cors,
+    )
+  }
+
+  const id = env.LIBRARY.idFromName(key)
+  const stub = env.LIBRARY.get(id)
+  const upstream = await stub.fetch(request)
+  const body = await upstream.text()
+  return new Response(body, {
+    status: upstream.status,
+    headers: {
+      ...cors,
+      'content-type': upstream.headers.get('content-type') || 'application/json; charset=utf-8',
+    },
+  })
+}
+
+function libraryKeyFromRequest(request: Request): string | null {
+  const raw =
+    request.headers.get('x-library-key') ||
+    request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
+    ''
+  const key = raw.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+  return LIBRARY_KEY_RE.test(key) ? key : null
 }
 
 async function handleGenerate(
@@ -173,22 +307,104 @@ async function handleGenerate(
 
   const current =
     body.current && Array.isArray(body.current.blocks) ? body.current : undefined
+  const clarifications = normalizeClarificationAnswers(body.clarifications)
+  const answersResolved =
+    body.resolvedClarifications === true || clarifications.length > 0
 
   try {
-    const generated = await callOpenAI(
-      body.prompt.trim(),
-      body.ftp,
-      env.OPENAI_API_KEY,
-      current,
-    )
+    const prompt = body.prompt.trim()
+    const apiKey = env.OPENAI_API_KEY
+
+    // After the rider answered clarifying questions, never re-ask — generate.
+    if (!answersResolved) {
+      const route = await decidePromptRoute(prompt, body.ftp, apiKey, current)
+      if (route === 'clarify') {
+        const questions = await generateClarifyingQuestions(prompt, body.ftp, apiKey, current)
+        if (questions.length === 0) {
+          return json(
+            { error: 'Clarification was needed but no questions were returned.' },
+            502,
+            cors,
+          )
+        }
+        return json(
+          {
+            status: 'clarifying',
+            questions,
+            name: '',
+            description: '',
+            blocks: [],
+          },
+          200,
+          cors,
+        )
+      }
+    }
+
+    const generated = await callOpenAI(prompt, body.ftp, apiKey, current, clarifications)
+
+    // Safety net: if the model still tries to clarify after answers, force generate once.
+    if (generated.status === 'clarifying') {
+      if (answersResolved) {
+        const forced = await callOpenAI(
+          prompt,
+          body.ftp,
+          apiKey,
+          current,
+          clarifications,
+          true,
+        )
+        if (forced.status === 'clarifying' || validateBlocks(forced.blocks).length === 0) {
+          return json(
+            { error: 'Could not build the workout from your answers. Try again.' },
+            502,
+            cors,
+          )
+        }
+        const blocks = validateBlocks(forced.blocks)
+        const response: Record<string, unknown> = {
+          status: 'workout',
+          name: forced.name || 'Generated ride',
+          description: forced.description || '',
+          blocks,
+          questions: [],
+        }
+        const ftpOut = validateFtpOptional(forced.ftp) ?? body.ftp
+        if (ftpOut !== body.ftp) response.ftp = ftpOut
+        return json(response, 200, cors)
+      }
+
+      const questions = normalizeClarifyingQuestions(generated.questions)
+      if (questions.length === 0) {
+        return json(
+          { error: 'Model asked for clarification but returned no questions.' },
+          502,
+          cors,
+        )
+      }
+      return json(
+        {
+          status: 'clarifying',
+          questions,
+          name: generated.name || '',
+          description: generated.description || '',
+          blocks: [],
+        },
+        200,
+        cors,
+      )
+    }
+
     const blocks = validateBlocks(generated.blocks)
     if (blocks.length === 0) {
       return json({ error: 'Model returned no valid workout blocks.' }, 502, cors)
     }
     const response: Record<string, unknown> = {
+      status: 'workout',
       name: generated.name || 'Generated ride',
       description: generated.description || '',
       blocks,
+      questions: [],
     }
     const ftpOut = validateFtpOptional(generated.ftp) ?? body.ftp
     if (ftpOut !== body.ftp) response.ftp = ftpOut
@@ -200,41 +416,348 @@ async function handleGenerate(
   }
 }
 
+const CLARIFY_ROUTE_CONFIDENCE_FLOOR = 0.55
+
+type PromptRoute = 'clarify' | 'generate'
+
+/**
+ * Use OpenAI Decisions API to judge whether the rider request is specific enough
+ * in context of the current workout (if any). Falls back to a chat decision if
+ * Decisions is unavailable for the account/key.
+ */
+async function decidePromptRoute(
+  prompt: string,
+  ftp: number,
+  apiKey: string,
+  current?: GenerateRequest['current'],
+): Promise<PromptRoute> {
+  try {
+    return await decidePromptRouteWithDecisions(prompt, ftp, apiKey, current)
+  } catch {
+    return decidePromptRouteWithChat(prompt, ftp, apiKey, current)
+  }
+}
+
+async function decidePromptRouteWithDecisions(
+  prompt: string,
+  ftp: number,
+  apiKey: string,
+  current?: GenerateRequest['current'],
+): Promise<PromptRoute> {
+  const mode = current ? 'edit_existing_workout' : 'create_new_workout'
+  const response = await fetch('https://api.openai.com/v1/decisions', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-6-luna',
+      input: [
+        {
+          role: 'developer',
+          content: `You route indoor cycling / Zwift workout requests.
+Default to clarify whenever anything important must be guessed.
+Always clarify for vague relative language (more, less, harder, easier, longer, shorter, higher, lower) unless the prompt already states what changes and by how much, or already includes answered clarifying Q&A.
+Single-word or ultra-short requests like "more" or "less" are clarify — never generate.
+Only choose generate when the request is specific enough to build or update the profile without inventing targets or magnitudes.`,
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: `Rider request:\n${prompt}`,
+            },
+            {
+              type: 'input_json',
+              data: {
+                mode,
+                ftp,
+                currentWorkout: current ?? null,
+              },
+            },
+          ],
+        },
+      ],
+      questions: [
+        {
+          type: 'choice',
+          name: 'route',
+          instructions:
+            'Is this rider request specific enough to create or update the Zwift workout without guessing? If the request is vague, relative, conflicting, or missing what/how-much (including prompts like "more"), choose clarify.',
+          choices: [
+            {
+              value: 'clarify',
+              description:
+                'Ambiguous or underspecified — ask clarifying questions (e.g. "more", "harder", missing amount/target)',
+            },
+            {
+              value: 'generate',
+              description:
+                'Specific enough — named structure, amounts, or answered clarifications are present',
+            },
+          ],
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const detail = await response.text()
+    throw new Error(`Decisions API error (${response.status}): ${detail.slice(0, 200)}`)
+  }
+
+  const data = (await response.json()) as {
+    answers?: Array<{
+      type?: string
+      name?: string | null
+      choice?: string | boolean
+      confidence?: number
+    }>
+  }
+  const answer = data.answers?.find((a) => a.name === 'route') ?? data.answers?.[0]
+  if (!answer || answer.type === 'refusal') {
+    throw new Error('Decisions API refused or returned no route answer.')
+  }
+  if (answer.type !== 'choice') {
+    throw new Error('Decisions API returned an unexpected answer type.')
+  }
+
+  const choice = String(answer.choice)
+  const confidence = typeof answer.confidence === 'number' ? answer.confidence : 1
+  if (choice === 'clarify') return 'clarify'
+  if (choice === 'generate' && confidence >= CLARIFY_ROUTE_CONFIDENCE_FLOOR) return 'generate'
+  // Low-confidence generate → ask questions instead of guessing.
+  return 'clarify'
+}
+
+const ROUTE_JSON_SCHEMA = {
+  name: 'prompt_route',
+  strict: true,
+  schema: {
+    type: 'object',
+    properties: {
+      route: {
+        type: 'string',
+        enum: ['clarify', 'generate'],
+        description:
+          'clarify = ask questions first; generate = request is specific enough to build/update now',
+      },
+    },
+    required: ['route'],
+    additionalProperties: false,
+  },
+} as const
+
+async function decidePromptRouteWithChat(
+  prompt: string,
+  ftp: number,
+  apiKey: string,
+  current?: GenerateRequest['current'],
+): Promise<PromptRoute> {
+  const mode = current ? 'edit' : 'create'
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      temperature: 0,
+      response_format: {
+        type: 'json_schema',
+        json_schema: ROUTE_JSON_SCHEMA,
+      },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Route Zwift bike workout prompts. Default to clarify. Return clarify for vague/relative requests (more, less, harder, easier, longer, shorter) unless what and how-much are explicit, or clarifying Q&A was already answered. Single-word prompts like "more" are always clarify. Return generate only when specific enough to build or update without guessing.',
+        },
+        {
+          role: 'user',
+          content: `Mode: ${mode}. FTP: ${ftp} W.
+${current ? `Current workout JSON:\n${JSON.stringify(current)}\n\n` : ''}Rider request:\n${prompt}`,
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const detail = await response.text()
+    throw new Error(`Route decision failed (${response.status}): ${detail.slice(0, 200)}`)
+  }
+
+  const data = (await response.json()) as OpenAiChatCompletion
+  const content = data.choices?.[0]?.message?.content
+  if (!content?.trim()) throw new Error('Empty route decision from OpenAI.')
+  const parsed = parseModelJsonContent(content) as { route?: string }
+  return parsed.route === 'generate' ? 'generate' : 'clarify'
+}
+
+const CLARIFY_QUESTIONS_SCHEMA = {
+  name: 'clarifying_questions',
+  strict: true,
+  schema: {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 3,
+        description: '1–3 tap-to-answer clarifying questions',
+        items: {
+          type: 'object',
+          properties: {
+            prompt: {
+              type: 'string',
+              description: 'Short concrete question the rider can answer by tapping an option',
+            },
+            options: {
+              type: 'array',
+              minItems: 2,
+              maxItems: 5,
+              items: { type: 'string' },
+              description:
+                '2–5 complete selectable answers (never empty). Each option must be a full usable answer.',
+            },
+          },
+          required: ['prompt', 'options'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['questions'],
+    additionalProperties: false,
+  },
+} as const
+
+async function generateClarifyingQuestions(
+  prompt: string,
+  ftp: number,
+  apiKey: string,
+  current?: GenerateRequest['current'],
+): Promise<ClarifyingQuestion[]> {
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      temperature: 0.2,
+      response_format: {
+        type: 'json_schema',
+        json_schema: CLARIFY_QUESTIONS_SCHEMA,
+      },
+      messages: [
+        {
+          role: 'system',
+          content: `You write clarifying questions for a Zwift bike workout builder UI with tappable chips.
+
+Rules:
+- Ask only what is needed to act (usually 1–2 questions, max 3).
+- Every question MUST include 2–5 concrete selectable options. Never leave options empty.
+- Options must be complete answers the rider can tap — e.g. "Work intervals only", "+5% FTP", "+5 minutes total".
+- Never ask yes/no, optional, or fill-in defaults like "none", "0", "n/a", "skip", "no change".
+- Do not ask about cadence, text alerts, FTP, author, or anything unrelated to the ambiguous request.
+- For vague edits like "more"/"less", ask (1) more/less of what and (2) how much — with concrete options tied to the current workout when provided.
+- Do not invent a workout. Questions only.`,
+        },
+        {
+          role: 'user',
+          content: `FTP: ${ftp} W.
+${current ? `Current workout JSON:\n${JSON.stringify(current)}\n\n` : ''}Ambiguous rider request:\n${prompt}`,
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const detail = await response.text()
+    throw new Error(`Clarifying questions failed (${response.status}): ${detail.slice(0, 200)}`)
+  }
+
+  const data = (await response.json()) as OpenAiChatCompletion
+  const content = data.choices?.[0]?.message?.content
+  if (!content?.trim()) throw new Error('Empty clarifying questions from OpenAI.')
+  const parsed = parseModelJsonContent(content) as { questions?: unknown }
+  return normalizeClarifyingQuestions(parsed.questions).filter((q) => q.options.length >= 2)
+}
+
+function normalizeClarificationAnswers(raw: unknown): ClarificationAnswer[] {
+  if (!Array.isArray(raw)) return []
+  const out: ClarificationAnswer[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const obj = item as Record<string, unknown>
+    const question = typeof obj.question === 'string' ? obj.question.trim() : ''
+    const answer = typeof obj.answer === 'string' ? obj.answer.trim() : ''
+    if (!question || !answer) continue
+    out.push({ question, answer })
+  }
+  return out.slice(0, 8)
+}
+
 async function callOpenAI(
   prompt: string,
   ftp: number,
   apiKey: string,
   current?: GenerateRequest['current'],
+  clarifications: ClarificationAnswer[] = [],
+  forceWorkout = false,
 ): Promise<GeneratedWorkout> {
+  const hasAnswers = clarifications.length > 0
   const system = `You are an expert indoor cycling coach building structured Zwift bike workouts (.zwo format). Output JSON only.
 
 Context:
 - Workouts are a timeline of power targets as % of the rider's FTP (functional threshold power). 100% ≈ one-hour max sustainable power. The app converts % to watts using the workout FTP.
 - Typical session shape: progressive warmup → main set (steady state and/or intervals) → cooldown. Match total duration and intensity to the user's goal.
 - Power zones (% FTP): Z1 recovery 0–55%; Z2 endurance 55–75%; Z3 tempo 75–90%; Z4 threshold/sweet spot ~88–105%; Z5 VO2max 105–120%; Z6+ short anaerobic/sprints (use sparingly).
-- Common formats: endurance (long Z2); tempo (Z3 blocks); sweet spot (88–94% sustained or repeats); threshold (95–105%); VO2 intervals (106–120% work with equal or longer recovery); over-unders; cadence drills (note in description—power still set here); recovery spins (Z1–low Z2).
+- Common formats: endurance (long Z2); tempo (Z3 blocks); sweet spot (88–94% sustained or repeats); threshold (95–105%); VO2 intervals (106–120% work with equal or longer recovery); over-unders; cadence drills; recovery spins (Z1–low Z2).
 - Intervals: use recovery "off" at 50–65% unless the user asks otherwise; size repeat count and work duration for the requested time and difficulty; avoid unrealistic stack of high-intensity blocks without recovery.
 - Use "freeride" only when the user wants unstructured riding or open-ended segments; otherwise prefer explicit power blocks.
+- Cadence is optional rpm (null when not specified). For intervals, cadence = work, cadenceResting = recovery.
+- Text overlays: each block has "texts" — short on-screen Zwift cues ({ timeOffsetSec, message, durationSec|null }). Use sparingly for coaching moments (start of work bout, "1 min left", form reminders). Use [] when none. Preserve existing texts on edit unless the rider asks to change/remove them or the block timing makes them wrong.
 
-Block schema (durations in seconds; power fields are % FTP, not watts):
-- warmup, cooldown, ramp: { "type": "warmup"|"cooldown"|"ramp", "durationSec", "startPct", "endPct" } — ramps for gradual build/recovery (e.g. warmup 50→75%).
-- steady: { "type": "steady", "durationSec", "powerPct" }
-- intervals: { "type": "intervals", "repeat", "onDurationSec", "offDurationSec", "onPct", "offPct" }
-- freeride: { "type": "freeride", "durationSec" }
+Routing:
+${
+  forceWorkout || hasAnswers
+    ? `- The rider already answered clarifying questions. You MUST set status to "workout", questions to [], and return the full blocks. Do not ask more questions.`
+    : `- Ambiguity is decided upstream. Prefer status "workout" with a full block list and questions [].
+- Only set status "clarifying" if you still cannot build the profile without guessing; then leave blocks [] and put 1–3 questions with 2–5 selectable options each.`
+}
+- You may change any part of the workout the rider asks for (structure, power, duration, cadence, text overlays). Prefer targeted edits over rewriting everything.
 
-Always set a clear workout name and a short description (goal, key efforts, total time feel).
-Output one JSON object with these exact top-level keys (not nested under "workout"): "name", "description", "ftp", "blocks".
-Example shape: { "name": "Sweet Spot 60", "description": "3×8 min at 92% with easy spin recoveries.", "ftp": 250, "blocks": [ ... ] }
-Always set "ftp" to the rider FTP from the user message unless they explicitly ask for a different workout FTP.
-When editing, return the full updated profile (all blocks plus name and description), not a partial patch.`
+Block schema (durations in seconds; power fields are % FTP, not watts; cadence null or rpm; texts always present, often []):
+- warmup, cooldown, ramp: { "type", "durationSec", "startPct", "endPct", "cadence", "texts" }
+- steady: { "type", "durationSec", "powerPct", "cadence", "texts" }
+- intervals: { "type", "repeat", "onDurationSec", "offDurationSec", "onPct", "offPct", "cadence", "cadenceResting", "texts" }
+- freeride: { "type", "durationSec", "cadence", "texts" }
+
+Always set ftp to the rider FTP from the user message unless they explicitly ask for a different workout FTP.
+When editing an existing workout and status is workout, return the full updated profile (all blocks), not a partial patch.`
+
+  const clarificationBlock =
+    clarifications.length > 0
+      ? `\nRider answers to clarifying questions:\n${clarifications
+          .map((c, i) => `${i + 1}. ${c.question}\nAnswer: ${c.answer}`)
+          .join('\n\n')}\n`
+      : ''
 
   const userContent = current
-    ? `FTP: ${ftp} W. The user has an existing workout—update it per their request and return the full profile.
+    ? `FTP: ${ftp} W. Update the existing workout per the rider request and return the full profile.
 Current workout JSON:
 ${JSON.stringify(current)}
 
-User request: ${prompt}`
-    : `FTP: ${ftp} W. Create a new workout from scratch: ${prompt}`
+Original rider request: ${prompt}
+${clarificationBlock}`
+    : `FTP: ${ftp} W. Create a new workout from scratch.
+Rider request: ${prompt}
+${clarificationBlock}`
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -308,9 +831,12 @@ function parseModelJsonContent(content: string): unknown {
 
 function assertWorkoutJsonShape(raw: unknown): void {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('OpenAI JSON must be an object with name, description, and blocks.')
+    throw new Error('OpenAI JSON must be an object with status, name, description, and blocks.')
   }
   const obj = raw as Record<string, unknown>
+  if (obj.status !== 'workout' && obj.status !== 'clarifying') {
+    throw new Error('OpenAI JSON missing status "workout" or "clarifying".')
+  }
   if (typeof obj.name !== 'string') {
     throw new Error('OpenAI JSON missing string field "name".')
   }
@@ -322,6 +848,9 @@ function assertWorkoutJsonShape(raw: unknown): void {
   }
   if (!Array.isArray(obj.blocks)) {
     throw new Error('OpenAI JSON missing array field "blocks".')
+  }
+  if (!Array.isArray(obj.questions)) {
+    throw new Error('OpenAI JSON missing array field "questions".')
   }
 }
 
@@ -335,7 +864,7 @@ function firstNonEmptyString(obj: Record<string, unknown>, keys: string[]): stri
 
 function normalizeModelWorkout(raw: unknown): GeneratedWorkout {
   if (!raw || typeof raw !== 'object') {
-    return { name: 'Generated ride', description: '', blocks: [] }
+    return { status: 'workout', name: 'Generated ride', description: '', blocks: [], questions: [] }
   }
 
   let root = raw as Record<string, unknown>
@@ -345,14 +874,118 @@ function normalizeModelWorkout(raw: unknown): GeneratedWorkout {
 
   const name = firstNonEmptyString(root, ['name', 'title', 'workoutName']) || 'Generated ride'
   const description = firstNonEmptyString(root, ['description', 'desc', 'summary'])
+  const status = root.status === 'clarifying' ? 'clarifying' : 'workout'
 
-  let blocks = root.blocks ?? root.segments ?? root.profile
-  if (!Array.isArray(blocks)) blocks = []
+  const blocksRaw = root.blocks ?? root.segments ?? root.profile
+  const blocks: unknown[] = Array.isArray(blocksRaw) ? blocksRaw : []
+
+  const questions = normalizeClarifyingQuestions(root.questions)
 
   const ftp = validateFtpOptional(root.ftp)
-  return ftp !== undefined
-    ? { name, description, blocks, ftp }
-    : { name, description, blocks }
+  return {
+    status,
+    name,
+    description,
+    blocks,
+    questions,
+    ...(ftp !== undefined ? { ftp } : {}),
+  }
+}
+
+function normalizeClarifyingQuestions(raw: unknown): ClarifyingQuestion[] {
+  if (!Array.isArray(raw)) return []
+  const out: ClarifyingQuestion[] = []
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const prompt = item.trim()
+      if (prompt) out.push({ prompt, options: [] })
+      continue
+    }
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const obj = item as Record<string, unknown>
+    const prompt =
+      typeof obj.prompt === 'string'
+        ? obj.prompt.trim()
+        : typeof obj.question === 'string'
+          ? obj.question.trim()
+          : typeof obj.text === 'string'
+            ? obj.text.trim()
+            : ''
+    if (!prompt) continue
+    const options = Array.isArray(obj.options)
+      ? obj.options
+          .filter((o): o is string => typeof o === 'string')
+          .map((o) => o.trim())
+          .filter(Boolean)
+          .slice(0, 6)
+      : []
+    out.push({ prompt, options })
+  }
+  return out.slice(0, 4)
+}
+
+function optionalCadence(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 30 || n > 200) return undefined
+  return Math.round(n)
+}
+
+function withCadence(
+  base: Record<string, unknown>,
+  block: Record<string, unknown>,
+  resting = false,
+): Record<string, unknown> {
+  const cadence = optionalCadence(block.cadence)
+  const next = { ...base }
+  if (cadence !== undefined) next.cadence = cadence
+  if (resting) {
+    const cadenceResting = optionalCadence(block.cadenceResting)
+    if (cadenceResting !== undefined) next.cadenceResting = cadenceResting
+  }
+  return withTexts(next, block)
+}
+
+function validateTexts(raw: unknown, blockDurationSec: number): Record<string, unknown>[] {
+  if (!Array.isArray(raw)) return []
+  const maxOffset = Math.max(0, blockDurationSec)
+  const out: Record<string, unknown>[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const obj = item as Record<string, unknown>
+    const message = typeof obj.message === 'string' ? obj.message.trim() : ''
+    if (!message) continue
+    const offsetRaw = Number(obj.timeOffsetSec)
+    const timeOffsetSec = Number.isFinite(offsetRaw)
+      ? Math.max(0, Math.min(maxOffset, Math.round(offsetRaw)))
+      : 0
+    const alert: Record<string, unknown> = { timeOffsetSec, message: message.slice(0, 160) }
+    if (obj.durationSec !== null && obj.durationSec !== undefined && obj.durationSec !== '') {
+      const dur = Number(obj.durationSec)
+      if (Number.isFinite(dur) && dur >= 1) {
+        alert.durationSec = Math.min(300, Math.round(dur))
+      }
+    }
+    out.push(alert)
+    if (out.length >= 12) break
+  }
+  return out
+}
+
+function withTexts(
+  base: Record<string, unknown>,
+  block: Record<string, unknown>,
+): Record<string, unknown> {
+  const durationSec =
+    typeof base.durationSec === 'number'
+      ? base.durationSec
+      : typeof base.repeat === 'number' &&
+          typeof base.onDurationSec === 'number' &&
+          typeof base.offDurationSec === 'number'
+        ? Number(base.repeat) * (Number(base.onDurationSec) + Number(base.offDurationSec))
+        : 0
+  const texts = validateTexts(block.texts, durationSec)
+  return texts.length > 0 ? { ...base, texts } : base
 }
 
 function validateBlocks(raw: unknown): Record<string, unknown>[] {
@@ -363,23 +996,33 @@ function validateBlocks(raw: unknown): Record<string, unknown>[] {
     const block = item as Record<string, unknown>
     const type = block.type
     if (type === 'steady' && isPos(block.durationSec) && isPct(block.powerPct)) {
-      out.push({
-        type: 'steady',
-        durationSec: roundSec(block.durationSec),
-        powerPct: Number(block.powerPct),
-      })
+      out.push(
+        withCadence(
+          {
+            type: 'steady',
+            durationSec: roundSec(block.durationSec),
+            powerPct: Number(block.powerPct),
+          },
+          block,
+        ),
+      )
     } else if (
       (type === 'warmup' || type === 'cooldown' || type === 'ramp') &&
       isPos(block.durationSec) &&
       isPct(block.startPct) &&
       isPct(block.endPct)
     ) {
-      out.push({
-        type,
-        durationSec: roundSec(block.durationSec),
-        startPct: Number(block.startPct),
-        endPct: Number(block.endPct),
-      })
+      out.push(
+        withCadence(
+          {
+            type,
+            durationSec: roundSec(block.durationSec),
+            startPct: Number(block.startPct),
+            endPct: Number(block.endPct),
+          },
+          block,
+        ),
+      )
     } else if (
       type === 'intervals' &&
       isPos(block.repeat) &&
@@ -388,16 +1031,24 @@ function validateBlocks(raw: unknown): Record<string, unknown>[] {
       isPct(block.onPct) &&
       isPct(block.offPct)
     ) {
-      out.push({
-        type: 'intervals',
-        repeat: Math.round(Number(block.repeat)),
-        onDurationSec: roundSec(block.onDurationSec),
-        offDurationSec: roundSec(block.offDurationSec),
-        onPct: Number(block.onPct),
-        offPct: Number(block.offPct),
-      })
+      out.push(
+        withCadence(
+          {
+            type: 'intervals',
+            repeat: Math.round(Number(block.repeat)),
+            onDurationSec: roundSec(block.onDurationSec),
+            offDurationSec: roundSec(block.offDurationSec),
+            onPct: Number(block.onPct),
+            offPct: Number(block.offPct),
+          },
+          block,
+          true,
+        ),
+      )
     } else if (type === 'freeride' && isPos(block.durationSec)) {
-      out.push({ type: 'freeride', durationSec: roundSec(block.durationSec) })
+      out.push(
+        withCadence({ type: 'freeride', durationSec: roundSec(block.durationSec) }, block),
+      )
     }
   }
   return out
@@ -429,8 +1080,8 @@ function corsHeaders(request: Request, env: Env): Record<string, string> {
     origin && (allowed.has(origin) || allowed.has('*')) ? origin : allowed.values().next().value ?? ''
 
   const headers: Record<string, string> = {
-    'access-control-allow-methods': 'GET, POST, OPTIONS',
-    'access-control-allow-headers': 'content-type',
+    'access-control-allow-methods': 'GET, PUT, POST, OPTIONS',
+    'access-control-allow-headers': 'content-type, x-library-key, authorization',
     'access-control-max-age': '86400',
   }
   if (allowOrigin) headers['access-control-allow-origin'] = allowOrigin

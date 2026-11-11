@@ -8,6 +8,15 @@ enabled = true
 [dev]
 port = 8787
 
+# Per–backup-code library storage. Created automatically for local + production.
+[[durable_objects.bindings]]
+name = "LIBRARY"
+class_name = "LibraryDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LibraryDO"]
+
 # ~20 generate calls / minute / client IP
 [[ratelimits]]
 name = "GENERATE_RATE_LIMIT"

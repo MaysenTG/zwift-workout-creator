@@ -4,7 +4,7 @@ import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dn
 import { CSS } from '@dnd-kit/utilities'
 import { formatClock, formatMinutes } from '../lib/time'
 import { snapDuration, type DurationSnapSec } from '../lib/settings'
-import { BLOCK_LABELS, blockDuration, maxPowerPct, workoutDuration } from '../lib/workout'
+import { BLOCK_LABELS, blockDuration, blockTexts, maxPowerPct, workoutDuration } from '../lib/workout'
 import { mixZoneColor, zoneForPercent } from '../lib/zones'
 import type { Workout, WorkoutBlock } from '../types'
 
@@ -225,11 +225,23 @@ function ChartBlock({
       onClick={() => {
         if (!isPreview) onSelect(block.id)
       }}
-      {...(isPreview || canResize ? {} : listeners)}
+      {...(isPreview ? {} : listeners)}
       {...attributes}
     >
       <span className="shape-wrap">
         <BlockShape block={block} peak={peak} />
+        {blockTexts(block).map((alert) => {
+          const maxDur = Math.max(blockDuration(block), 1)
+          const left = `${(clamp(alert.timeOffsetSec, 0, maxDur) / maxDur) * 100}%`
+          return (
+            <span
+              key={alert.id}
+              className="chart-text-marker"
+              style={{ left }}
+              title={`${formatMinutes(alert.timeOffsetSec)} · ${alert.message || 'Text alert'}`}
+            />
+          )
+        })}
         {canResize && block.type !== 'freeride' ? (
           <span
             className="chart-handle chart-handle-power"
@@ -255,17 +267,24 @@ function ChartBlock({
         <em>{BLOCK_LABELS[block.type]}</em>
         <small>{formatMinutes(blockDuration(block))}</small>
         <small>{powerCaption(block, ftp, unit)}</small>
+        {cadenceCaption(block) ? <small>{cadenceCaption(block)}</small> : null}
       </span>
-      {canResize ? (
-        <span
-          className="chart-drag-grip"
-          title="Drag to reorder"
-          {...listeners}
-          onClick={(e) => e.stopPropagation()}
-        />
-      ) : null}
     </button>
   )
+}
+
+function cadenceCaption(block: WorkoutBlock): string | null {
+  if (block.type === 'intervals') {
+    if (block.cadence == null && block.cadenceResting == null) return null
+    const on = block.cadence != null ? `${block.cadence}` : '—'
+    const off = block.cadenceResting != null ? `${block.cadenceResting}` : '—'
+    return `${on}/${off} rpm`
+  }
+  if (block.cadenceLow != null && block.cadenceHigh != null) {
+    return `${block.cadenceLow}–${block.cadenceHigh} rpm`
+  }
+  if (block.cadence != null) return `${block.cadence} rpm`
+  return null
 }
 
 function powerPatch(block: WorkoutBlock, pct: number): Partial<WorkoutBlock> {
